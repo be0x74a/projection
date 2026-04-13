@@ -1,6 +1,7 @@
 name: OpenSSF Scorecard
 
 on:
+  workflow_dispatch:
   branch_protection_rule:
   schedule:
     # Weekly on Sundays at 07:00 UTC
