@@ -11,58 +11,42 @@ on:
     # Weekly on Sundays at 06:00 UTC
     - cron: '0 6 * * 0'
 
+# Top-level read-only; security-events: write is granted only to the job
+# that actually uploads CodeQL SARIF (principle of least privilege).
 permissions:
-  actions: read
   contents: read
-  security-events: write
 
 jobs:
   analyze:
     name: Analyze (Go)
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
         language: [go]
     steps:
-      # Code Scanning (the upload target) is only enabled by default on public
-      # repos, and on private repos it requires GitHub Advanced Security. While
-      # the repo is private and Code Scanning isn't enabled, exit cleanly so
-      # the workflow doesn't show as failed.
-      - name: Skip if repo is private
-        id: visibility
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VIS=$(gh api repos/${{ github.repository }} --jq .visibility)
-          echo "visibility=$VIS" >> "$GITHUB_OUTPUT"
-          if [[ "$VIS" != "public" ]]; then
-            echo "::notice::Repo is $VIS; CodeQL upload requires Code Scanning, which is unavailable. Skipping."
-          fi
-
       - name: Checkout
-        if: steps.visibility.outputs.visibility == 'public'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Go
-        if: steps.visibility.outputs.visibility == 'public'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: 1.22.x
           cache: true
 
       - name: Initialize CodeQL
-        if: steps.visibility.outputs.visibility == 'public'
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
         with:
           languages: ${{ matrix.language }}
 
       - name: Autobuild
-        if: steps.visibility.outputs.visibility == 'public'
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
 
       - name: Perform CodeQL analysis
-        if: steps.visibility.outputs.visibility == 'public'
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
         with:
           category: "/language:${{ matrix.language }}"

@@ -5,17 +5,21 @@ on:
     tags:
       - 'v*'
 
+# Top-level read-only; packages: write is granted only to the job that
+# actually pushes the chart (principle of least privilege).
 permissions:
   contents: read
-  packages: write
 
 jobs:
   release-chart:
     name: Package and push Helm chart
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Check for chart
         id: check
@@ -29,7 +33,7 @@ jobs:
 
       - name: Install Helm
         if: steps.check.outputs.has_chart == 'true'
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
 
       - name: Login to GitHub Container Registry
         if: steps.check.outputs.has_chart == 'true'
