@@ -1,0 +1,27 @@
+# permissions for end users to edit projections.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: projection
+    app.kubernetes.io/managed-by: kustomize
+  name: projection-editor-role
+rules:
+- apiGroups:
+  - projection.be0x74a.io
+  resources:
+  - projections
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - projection.be0x74a.io
+  resources:
+  - projections/status
+  verbs:
+  - get
