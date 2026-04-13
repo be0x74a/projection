@@ -65,7 +65,7 @@ jobs:
 
       - name: Install mkdocs-material
         if: steps.check.outputs.has_mkdocs == 'true'
-        run: pip install -r docs/requirements.txt
+        run: pip install --require-hashes -r docs/requirements.txt
 
       - name: Build site
         if: steps.check.outputs.has_mkdocs == 'true'
