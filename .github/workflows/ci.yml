@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+          cache: true
+      - name: Run lint
+        run: make lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [1.22.x, 1.23.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+      - name: Run tests
+        run: make test
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.go-version }}
+          path: cover.out
+          if-no-files-found: ignore
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [1.22.x, 1.23.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+      - name: Build
+        run: make build
+
+  e2e:
+    name: E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+          cache: true
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: projection-e2e
+          node_image: kindest/node:v1.31.0
+      - name: Build image
+        run: make docker-build IMG=projection:dev
+      - name: Load image into Kind
+        run: kind load docker-image projection:dev --name projection-e2e
+      - name: Install CRDs
+        run: make install
+      - name: Deploy operator
+        run: make deploy IMG=projection:dev
+      - name: Wait for operator Deployment to be Ready
+        run: |
+          kubectl -n projection-system rollout status deploy/projection-controller-manager --timeout=180s
+      - name: Run e2e tests
+        run: make test-e2e
+      - name: Collect operator logs
+        if: failure()
+        run: |
+          mkdir -p e2e-logs
+          kubectl -n projection-system get pods -o wide > e2e-logs/pods.txt || true
+          kubectl -n projection-system describe pods > e2e-logs/describe.txt || true
+          kubectl -n projection-system logs deploy/projection-controller-manager --all-containers=true --tail=-1 > e2e-logs/controller.log || true
+      - name: Upload operator logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: e2e-logs
+          if-no-files-found: ignore
