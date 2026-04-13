@@ -1,0 +1,113 @@
+# Default values for the projection chart.
+# This is a YAML-formatted file. Values may be overridden with --set or --values.
+
+# -- Container image for the controller-manager.
+image:
+  # -- Image repository. Override for a private registry or custom build.
+  repository: ghcr.io/be0x74a/projection
+  # -- Image tag. Empty string falls back to the chart's appVersion.
+  tag: ""
+  # -- Image pull policy. Defaults to IfNotPresent for tagged images.
+  pullPolicy: IfNotPresent
+
+# -- List of image pull secrets referenced by the controller pod.
+# Example: [{ name: ghcr-cred }]
+imagePullSecrets: []
+
+# -- Override the chart name portion of generated resource names.
+nameOverride: ""
+
+# -- Override the fully-qualified name (release-name-chart-name) used for all
+# generated resources. Leave empty to use the default template.
+fullnameOverride: ""
+
+# -- Number of controller replicas. Values >1 require leaderElection.enabled=true
+# so only one replica reconciles at a time.
+replicaCount: 1
+
+# -- Leader election settings. The leader lease is stored in the release namespace.
+leaderElection:
+  # -- Enable Kubernetes leader election. Required when replicaCount > 1.
+  enabled: true
+
+# -- Metrics endpoint settings. The controller serves Prometheus metrics on
+# :8443 secured by the kube-rbac-authn/authz filter by default.
+metrics:
+  # -- Enable the metrics HTTP(S) endpoint and associated Service.
+  enabled: true
+  # -- Serve metrics over HTTPS with authn/authz filter. Set to false to serve
+  # plaintext HTTP (not recommended).
+  secure: true
+  # -- Address the metrics endpoint binds to. Format: host:port.
+  bindAddress: ":8443"
+  # -- Metrics Service configuration. Created only when metrics.enabled is true.
+  service:
+    # -- Service type. Use ClusterIP for in-cluster scrape (recommended).
+    type: ClusterIP
+    # -- Service port exposing the metrics endpoint.
+    port: 8443
+
+# -- Health probe endpoint settings. Exposes /healthz and /readyz.
+healthProbe:
+  # -- Address the health probe endpoint binds to. Format: host:port.
+  bindAddress: ":8081"
+
+# -- Resource requests and limits for the controller container.
+# Sensible defaults for a single-tenant operator; tune for your workload.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# -- Node selector applied to the controller pod.
+nodeSelector: {}
+
+# -- Tolerations applied to the controller pod.
+tolerations: []
+
+# -- Affinity rules for the controller pod.
+affinity: {}
+
+# -- Topology spread constraints for the controller pod.
+topologySpreadConstraints: []
+
+# -- Security contexts applied to the controller pod and container. Defaults
+# follow the Kubernetes "restricted" Pod Security Standard.
+securityContext:
+  # -- Pod-level securityContext.
+  pod:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container-level securityContext.
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# -- ServiceAccount configuration for the controller.
+serviceAccount:
+  # -- If true, a ServiceAccount is created for the controller.
+  create: true
+  # -- Name of the ServiceAccount to use. If empty and create is true, a name is
+  # generated from the release fullname.
+  name: ""
+  # -- Annotations to add to the ServiceAccount (e.g. IRSA/Workload Identity).
+  annotations: {}
+
+# -- CRD installation settings. Helm 3 only installs files under crds/ on the
+# FIRST install; subsequent upgrades do NOT reconcile CRDs and `helm uninstall`
+# does NOT delete them. Manage CRD lifecycle manually outside of Helm for
+# multi-release or upgrade scenarios.
+crds:
+  # -- Whether to let Helm install the bundled CRD on first install. Has no
+  # effect on upgrade or uninstall; this flag is purely for documentation
+  # consistency (Helm itself always reads crds/ on first install).
+  install: true

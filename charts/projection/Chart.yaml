@@ -1,0 +1,24 @@
+apiVersion: v2
+name: projection
+description: The Kubernetes CRD for declarative resource mirroring across namespaces.
+type: application
+version: 0.1.0-alpha
+appVersion: "0.1.0-alpha"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/be0x74a/projection
+sources:
+  - https://github.com/be0x74a/projection
+maintainers:
+  - name: be0x74a
+    url: https://github.com/be0x74a
+keywords:
+  - kubernetes
+  - operator
+  - mirror
+  - configmap
+  - secret
+  - reflector
+icon: https://raw.githubusercontent.com/be0x74a/projection/main/docs/assets/logo.svg
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: integration-delivery
