@@ -1,0 +1,54 @@
+name: Helm Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release-chart:
+    name: Package and push Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for chart
+        id: check
+        run: |
+          if [ -d charts/projection ] && [ -f charts/projection/Chart.yaml ]; then
+            echo "has_chart=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_chart=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::charts/projection not present; skipping Helm chart release."
+          fi
+
+      - name: Install Helm
+        if: steps.check.outputs.has_chart == 'true'
+        uses: azure/setup-helm@v4
+
+      - name: Login to GitHub Container Registry
+        if: steps.check.outputs.has_chart == 'true'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Package chart
+        if: steps.check.outputs.has_chart == 'true'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          helm package charts/projection \
+            --version "${VERSION}" \
+            --app-version "${VERSION}" \
+            --destination dist-chart
+
+      - name: Push chart to OCI registry
+        if: steps.check.outputs.has_chart == 'true'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          helm push "dist-chart/projection-${VERSION}.tgz" oci://ghcr.io/be0x74a/charts

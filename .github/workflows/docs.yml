@@ -1,0 +1,99 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build docs
+    runs-on: ubuntu-latest
+    outputs:
+      has_mkdocs: ${{ steps.check.outputs.has_mkdocs }}
+      visibility: ${{ steps.visibility.outputs.visibility }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for mkdocs.yml
+        id: check
+        run: |
+          if [ -f mkdocs.yml ]; then
+            echo "has_mkdocs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_mkdocs=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::mkdocs.yml not present; skipping docs build."
+          fi
+
+      # Pages is only available on public repos (or paid private). While the
+      # repo is private we still BUILD the site (catches broken links etc.) but
+      # skip the Pages-specific "configure" + "upload artifact" steps, which
+      # would otherwise fail with `Get Pages site failed`.
+      - name: Detect repo visibility
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VIS=$(gh api repos/${{ github.repository }} --jq .visibility)
+          echo "visibility=$VIS" >> "$GITHUB_OUTPUT"
+          if [[ "$VIS" != "public" ]]; then
+            echo "::notice::Repo is $VIS; building site but skipping Pages upload."
+          fi
+
+      - name: Setup Python
+        if: steps.check.outputs.has_mkdocs == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install mkdocs-material
+        if: steps.check.outputs.has_mkdocs == 'true'
+        run: pip install -r docs/requirements.txt
+
+      - name: Build site
+        if: steps.check.outputs.has_mkdocs == 'true'
+        run: mkdocs build --strict --site-dir _site
+
+      - name: Configure Pages
+        if: steps.check.outputs.has_mkdocs == 'true' && steps.visibility.outputs.visibility == 'public'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: steps.check.outputs.has_mkdocs == 'true' && steps.visibility.outputs.visibility == 'public'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: needs.build.outputs.has_mkdocs == 'true' && needs.build.outputs.visibility == 'public'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

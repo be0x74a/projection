@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write      # GitHub Release
+  packages: write      # ghcr.io
+  id-token: write      # cosign keyless OIDC
+  attestations: write  # build attestation
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # GoReleaser's image_templates use {{ .Version }} which strips the leading
+      # `v` from the tag, so the published image is `:0.1.0-alpha`, not
+      # `:v0.1.0-alpha`. Anything in this workflow that references the image
+      # tag must use the same form.
+      - name: Compute image tag (no leading v)
+        id: tag
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+          cache: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # GoReleaser's `sboms:` block invokes `syft` directly. Install it here
+      # so the binary is on PATH before `goreleaser release` runs.
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate manifests and DeepCopy code
+        run: make manifests generate
+
+      # GoReleaser owns dist/ and runs --clean on it, so we can't put anything
+      # there before it runs. The install.yaml gets generated AFTER goreleaser
+      # finishes (see "Build installer bundle" below).
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull the freshly-published image into the local docker daemon so syft
+      # can scan it locally instead of trying to authenticate against the
+      # private ghcr.io registry on its own.
+      - name: Pull image for SBOM
+        run: docker pull ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+
+      - name: Generate SBOM for image
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+          format: spdx-json
+          output-file: image.sbom.spdx.json
+          upload-artifact: false
+
+      - name: Sign image with cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign --yes ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+
+      - name: Attach SBOM to image
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign attach sbom --sbom image.sbom.spdx.json ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+          cosign sign --yes --attachment sbom ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+
+      # Now that goreleaser is done with dist/, build the install.yaml bundle
+      # and attach it to the GitHub Release. `make build-installer` mutates
+      # config/manager/kustomization.yaml, but the workspace is only used for
+      # this final step so the dirty state is harmless.
+      - name: Build installer bundle
+        run: make build-installer IMG=ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+
+      - name: Upload install.yaml to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/install.yaml
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
