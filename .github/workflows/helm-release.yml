@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check for chart
         id: check
@@ -29,7 +29,7 @@ jobs:
 
       - name: Install Helm
         if: steps.check.outputs.has_chart == 'true'
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Login to GitHub Container Registry
         if: steps.check.outputs.has_chart == 'true'

@@ -27,7 +27,7 @@ jobs:
       has_mkdocs: ${{ steps.check.outputs.has_mkdocs }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check for mkdocs.yml
         id: check
@@ -41,7 +41,7 @@ jobs:
 
       - name: Setup Python
         if: steps.check.outputs.has_mkdocs == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -56,11 +56,11 @@ jobs:
 
       - name: Configure Pages
         if: steps.check.outputs.has_mkdocs == 'true'
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload Pages artifact
         if: steps.check.outputs.has_mkdocs == 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: _site
 
@@ -75,4 +75,4 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
