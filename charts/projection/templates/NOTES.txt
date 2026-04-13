@@ -1,0 +1,34 @@
+projection {{ .Chart.AppVersion }} has been installed in namespace {{ .Release.Namespace }}.
+
+1. Verify the controller pod is running:
+
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+2. Inspect the Projection CRD schema:
+
+   kubectl explain projection
+   kubectl explain projection.spec
+
+3. Create your first Projection. A minimal example looks like:
+
+   apiVersion: projection.be0x74a.io/v1
+   kind: Projection
+   metadata:
+     name: my-first-projection
+     namespace: default
+   spec:
+     source:
+       apiVersion: v1
+       kind: ConfigMap
+       name: my-source
+       namespace: default
+     destination:
+       namespace: my-target-namespace
+       name: my-mirrored-cm
+
+See the chart README and https://github.com/be0x74a/projection for more examples.
+
+NOTE: CRDs were installed on first install only. Helm does not upgrade or
+delete CRDs. To remove the CRD manually:
+
+   kubectl delete crd projections.projection.be0x74a.io

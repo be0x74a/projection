@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "projection.fullname" . }}-manager
+  labels:
+    {{- include "projection.labels" . | nindent 4 }}
+rules:
+  # Projection mirrors arbitrary Kubernetes resources across namespaces, so it
+  # needs full read/write access to any Kind the user configures as source or
+  # destination. Narrow this down in downstream deployments if possible.
+  - apiGroups:
+      - '*'
+    resources:
+      - '*'
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - projection.be0x74a.io
+    resources:
+      - projections
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - projection.be0x74a.io
+    resources:
+      - projections/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - projection.be0x74a.io
+    resources:
+      - projections/status
+    verbs:
+      - get
+      - patch
+      - update
