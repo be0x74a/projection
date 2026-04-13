@@ -1,0 +1,41 @@
+# Apply overlay annotations.
+#
+# Same merge semantics as labels: overlay entries win on key conflict.
+# Useful for tagging the destination with provenance metadata your
+# observability stack can pick up.
+#
+# Note: regardless of overlay, projection always stamps:
+#   annotations:
+#     projection.be0x74a.io/owned-by: <projection-namespace>/<projection-name>
+# This is what the conflict-detection check uses on subsequent reconciles.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-staging
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feature-flags
+  namespace: platform
+data:
+  experimental_search: "true"
+---
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: flags-staging
+  namespace: platform
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: feature-flags
+    namespace: platform
+  destination:
+    namespace: app-staging
+  overlay:
+    annotations:
+      mirror.example.com/source: platform/feature-flags
+      mirror.example.com/team: platform-eng

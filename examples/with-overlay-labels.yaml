@@ -1,0 +1,46 @@
+# Apply overlay labels to the destination.
+#
+# The overlay is merged on top of the source's labels. Where keys collide,
+# the overlay wins. Use this to tag mirrored objects with the consuming
+# tenant, the owning team, or anything else that distinguishes a mirrored
+# copy from its source.
+#
+# Result: the destination ConfigMap will have:
+#   labels:
+#     env: prod                 # from source
+#     projected-by: projection  # from overlay
+#     tenant: tenant-a          # from overlay (overwrites any source value)
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shared-config
+  namespace: platform
+  labels:
+    env: prod
+    tenant: shared
+data:
+  endpoint: https://api.example.com
+---
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: shared-config-tenant-a
+  namespace: platform
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: shared-config
+    namespace: platform
+  destination:
+    namespace: tenant-a
+  overlay:
+    labels:
+      projected-by: projection
+      tenant: tenant-a
