@@ -79,6 +79,23 @@ make test    # unit + envtest
 New behavior should come with tests. If you change CRD fields or RBAC
 markers, run `make manifests generate` (or `make build`, which chains them).
 
+## Local development quirks
+
+A couple of gotchas worth knowing before you lose time to them:
+
+- **`make lint` locally on Go 1.23+**: the pinned `golangci-lint` v1.59.1 has
+  a known incompatibility with Go 1.23's new language features and will
+  panic during analysis. CI uses Go 1.22 so it's unaffected. If you're on
+  Go 1.23+, either install Go 1.22 alongside for lint runs, or bump
+  `GOLANGCI_LINT_VERSION` in the `Makefile` to a newer release locally.
+- **`kind load docker-image` with multi-arch manifests on Apple Silicon**:
+  Kind's image loader chokes on multi-arch manifest lists with a digest
+  mismatch error. Two workarounds: pull the per-platform tag
+  (`:X.Y.Z-arm64`) and load that, or skip the load and install the
+  operator with an `imagePullSecret` so the cluster pulls from the
+  registry directly (see `hack/observe.sh` area of the README for the
+  exact secret+SA patch commands).
+
 ## Code of Conduct
 
 This project follows the [Contributor Covenant](./CODE_OF_CONDUCT.md).
