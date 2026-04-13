@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible problem with projection.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill out
+        the sections below so we can reproduce and triage the issue quickly.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Short summary
+      description: A one-sentence description of the problem.
+      placeholder: "Projection of Secret X fails with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Kubernetes version, projection version, and install method.
+      value: |
+        - Kubernetes version (`kubectl version`):
+        - projection version (image tag or commit):
+        - Install method (Kustomize / Helm / `make deploy` / other):
+        - Cloud / distribution (Kind, EKS, GKE, AKS, k3s, etc.):
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps someone else could follow to reproduce this.
+      placeholder: |
+        1. Apply the following Projection: ...
+        2. Run `kubectl ...`
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Controller logs
+      description: Output of `kubectl logs -n projection-system deploy/projection-controller-manager`.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: projections
+    attributes:
+      label: Projection objects
+      description: Output of `kubectl get projections -A -o yaml` (redact anything sensitive).
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — screenshots, related issues, theories.
+    validations:
+      required: false
