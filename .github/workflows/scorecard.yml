@@ -11,6 +11,12 @@ on:
 
 permissions: read-all
 
+# The scorecard job must contain ONLY steps with `uses:` — no `run:` steps —
+# because `publish_results: true` uploads signed results to the public
+# securityscorecards.dev webapp, and the webapp rejects runs that have any
+# bespoke shell steps (see ossf/scorecard-action#workflow-restrictions).
+# If you ever take this repo private again, remove `publish_results: true`
+# instead of adding a visibility-check `run:` step — the latter breaks publishing.
 jobs:
   analysis:
     name: Scorecard analysis
@@ -21,28 +27,12 @@ jobs:
       contents: read
       actions: read
     steps:
-      # Scorecard requires the repo to be public — many of its checks call
-      # GraphQL endpoints that aren't accessible for private repos. While the
-      # repo is private, exit cleanly so the workflow doesn't show as failed.
-      - name: Skip if repo is private
-        id: visibility
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VIS=$(gh api repos/${{ github.repository }} --jq .visibility)
-          echo "visibility=$VIS" >> "$GITHUB_OUTPUT"
-          if [[ "$VIS" != "public" ]]; then
-            echo "::notice::Repo is $VIS; OpenSSF Scorecard only runs against public repos. Skipping."
-          fi
-
       - name: Checkout
-        if: steps.visibility.outputs.visibility == 'public'
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Run Scorecard
-        if: steps.visibility.outputs.visibility == 'public'
         uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: results.sarif
@@ -50,7 +40,6 @@ jobs:
           publish_results: true
 
       - name: Upload artifact
-        if: steps.visibility.outputs.visibility == 'public'
         uses: actions/upload-artifact@v4
         with:
           name: scorecard-results
@@ -58,7 +47,6 @@ jobs:
           retention-days: 5
 
       - name: Upload SARIF to code scanning
-        if: steps.visibility.outputs.visibility == 'public'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
