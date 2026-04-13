@@ -64,6 +64,22 @@ checksum:
 sboms:
   - artifacts: archive
 
+# Sign each release archive with cosign keyless (OIDC-backed via GitHub
+# Actions). Produces {archive}.sig + {archive}.pem attached to the GitHub
+# Release — required for OpenSSF Scorecard's Signed-Releases check.
+signs:
+  - cmd: cosign
+    signature: ${artifact}.sig
+    certificate: ${artifact}.pem
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: archive
+    output: true
+
 changelog:
   use: github
   groups:
