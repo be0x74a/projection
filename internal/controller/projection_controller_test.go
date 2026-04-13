@@ -95,7 +95,7 @@ func reconcileUntilSteady(r *ProjectionReconciler, key types.NamespacedName, max
 		var err error
 		res, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
-		if !res.Requeue {
+		if !res.Requeue { //nolint:staticcheck // SA1019: reconcile.Result.Requeue is deprecated but still surfaced by the reconciler's finalizer-add path; migration deferred with the EventRecorder change.
 			// One more pass is never wrong, but we need at least two: finalizer
 			// add (requeues) + real work. After real work, Requeue is false and
 			// RequeueAfter is set, so we stop.
