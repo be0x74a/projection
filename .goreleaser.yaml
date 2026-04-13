@@ -1,0 +1,113 @@
+version: 2
+project_name: projection
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: manager
+    main: ./cmd/main.go
+    binary: manager
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+dockers:
+  - image_templates:
+      - "ghcr.io/be0x74a/projection:{{ .Version }}-amd64"
+    use: buildx
+    dockerfile: Dockerfile.release
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/be0x74a/projection"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+  - image_templates:
+      - "ghcr.io/be0x74a/projection:{{ .Version }}-arm64"
+    use: buildx
+    goarch: arm64
+    dockerfile: Dockerfile.release
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/be0x74a/projection"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+
+docker_manifests:
+  - name_template: "ghcr.io/be0x74a/projection:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/be0x74a/projection:{{ .Version }}-amd64"
+      - "ghcr.io/be0x74a/projection:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/be0x74a/projection:latest"
+    image_templates:
+      - "ghcr.io/be0x74a/projection:{{ .Version }}-amd64"
+      - "ghcr.io/be0x74a/projection:{{ .Version }}-arm64"
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+sboms:
+  - artifacts: archive
+
+changelog:
+  use: github
+  groups:
+    - title: 'Features'
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: 'Bug fixes'
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: 'Documentation'
+      regexp: "^.*docs[(\\w)]*:+.*$"
+      order: 2
+    - title: 'Other'
+      order: 999
+  filters:
+    exclude:
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "merge conflict"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  draft: false
+  prerelease: auto
+  # `replace` lets us recover from a partially-uploaded release on the same
+  # tag (e.g. an earlier run failed mid-upload) by deleting and recreating
+  # the GitHub Release. Without this, GoReleaser bails with
+  # "Validation Failed: already_exists" on retry.
+  mode: replace
+  header: |
+    ## projection {{ .Tag }}
+
+    See [CHANGELOG.md](https://github.com/be0x74a/projection/blob/main/CHANGELOG.md) for the human-curated change log.
+  # `.Version` strips the leading "v" from the tag, matching what
+  # image_templates publish (`ghcr.io/.../projection:0.1.0-alpha`).
+  footer: |
+    **Container image:** `ghcr.io/be0x74a/projection:{{ .Version }}`
+    **Helm chart:** `oci://ghcr.io/be0x74a/charts/projection` version `{{ .Version }}`
+
+    Verify the image signature:
+    ```
+    cosign verify ghcr.io/be0x74a/projection:{{ .Version }} \
+      --certificate-identity-regexp '^https://github.com/be0x74a/projection/.github/workflows/' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    ```

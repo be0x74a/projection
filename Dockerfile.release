@@ -1,0 +1,11 @@
+# Used by GoReleaser to package the pre-built `manager` binary into a
+# distroless image. GoReleaser builds the binary outside Docker (via the
+# `builds:` block in .goreleaser.yaml) and then runs `docker build` with a
+# minimal context containing only this Dockerfile and the binary — that's why
+# this file is much shorter than the top-level Dockerfile (which builds from
+# source for `make docker-build`).
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY manager .
+USER 65532:65532
+ENTRYPOINT ["/manager"]
