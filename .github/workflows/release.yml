@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write      # GitHub Release
+  packages: write      # ghcr.io
+  id-token: write      # cosign keyless OIDC
+  attestations: write  # build attestation
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+          cache: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate manifests and DeepCopy code
+        run: make manifests generate
+
+      - name: Build installer bundle
+        run: make build-installer IMG=ghcr.io/be0x74a/projection:${{ github.ref_name }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SBOM for image
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/be0x74a/projection:${{ github.ref_name }}
+          format: spdx-json
+          output-file: image.sbom.spdx.json
+          upload-artifact: false
+
+      - name: Sign image with cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign --yes ghcr.io/be0x74a/projection:${{ github.ref_name }}
+
+      - name: Attach SBOM to image
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign attach sbom --sbom image.sbom.spdx.json ghcr.io/be0x74a/projection:${{ github.ref_name }}
+          cosign sign --yes --attachment sbom ghcr.io/be0x74a/projection:${{ github.ref_name }}
+
+      - name: Upload install.yaml to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/install.yaml
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
