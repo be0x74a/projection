@@ -1,0 +1,13 @@
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  labels:
+    app.kubernetes.io/name: projection
+    app.kubernetes.io/managed-by: kustomize
+  name: projection-sample
+spec:
+  source:
+    kind: ConfigMap
+    name: cm-1
+    namespace: ns-1
+  destination: cm-1-projection
