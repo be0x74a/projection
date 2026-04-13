@@ -1,0 +1,64 @@
+name: OpenSSF Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    # Weekly on Sundays at 07:00 UTC
+    - cron: '0 7 * * 0'
+  push:
+    branches:
+      - main
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      # Scorecard requires the repo to be public — many of its checks call
+      # GraphQL endpoints that aren't accessible for private repos. While the
+      # repo is private, exit cleanly so the workflow doesn't show as failed.
+      - name: Skip if repo is private
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VIS=$(gh api repos/${{ github.repository }} --jq .visibility)
+          echo "visibility=$VIS" >> "$GITHUB_OUTPUT"
+          if [[ "$VIS" != "public" ]]; then
+            echo "::notice::Repo is $VIS; OpenSSF Scorecard only runs against public repos. Skipping."
+          fi
+
+      - name: Checkout
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: ossf/scorecard-action@v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload artifact
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload SARIF to code scanning
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

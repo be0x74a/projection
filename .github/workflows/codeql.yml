@@ -1,0 +1,68 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly on Sundays at 06:00 UTC
+    - cron: '0 6 * * 0'
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (Go)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go]
+    steps:
+      # Code Scanning (the upload target) is only enabled by default on public
+      # repos, and on private repos it requires GitHub Advanced Security. While
+      # the repo is private and Code Scanning isn't enabled, exit cleanly so
+      # the workflow doesn't show as failed.
+      - name: Skip if repo is private
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VIS=$(gh api repos/${{ github.repository }} --jq .visibility)
+          echo "visibility=$VIS" >> "$GITHUB_OUTPUT"
+          if [[ "$VIS" != "public" ]]; then
+            echo "::notice::Repo is $VIS; CodeQL upload requires Code Scanning, which is unavailable. Skipping."
+          fi
+
+      - name: Checkout
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+          cache: true
+
+      - name: Initialize CodeQL
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        if: steps.visibility.outputs.visibility == 'public'
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
