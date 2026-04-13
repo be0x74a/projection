@@ -30,7 +30,10 @@ linters:
   enable:
     - dupl
     - errcheck
-    - exportloopref
+    # exportloopref was deprecated in golangci-lint v1.60.2: Go 1.22's loopvar
+    # change (per-iteration scope) eliminates the class of bugs this linter
+    # caught. Its direct replacement (copyloopvar) is also unnecessary for
+    # the same reason. Drop both.
     - ginkgolinter
     - goconst
     - gocyclo

@@ -7,7 +7,7 @@ Whether you're fixing a typo or adding a feature, you're welcome here.
 
 Prerequisites:
 
-- Go 1.22+
+- Go 1.24+
 - Docker (for building images and running Kind)
 - [Kind](https://kind.sigs.k8s.io/) (for local clusters and e2e tests)
 - `make`
@@ -83,11 +83,6 @@ markers, run `make manifests generate` (or `make build`, which chains them).
 
 A couple of gotchas worth knowing before you lose time to them:
 
-- **`make lint` locally on Go 1.23+**: the pinned `golangci-lint` v1.59.1 has
-  a known incompatibility with Go 1.23's new language features and will
-  panic during analysis. CI uses Go 1.22 so it's unaffected. If you're on
-  Go 1.23+, either install Go 1.22 alongside for lint runs, or bump
-  `GOLANGCI_LINT_VERSION` in the `Makefile` to a newer release locally.
 - **`kind load docker-image` with multi-arch manifests on Apple Silicon**:
   Kind's image loader chokes on multi-arch manifest lists with a digest
   mismatch error. Two workarounds: pull the per-platform tag

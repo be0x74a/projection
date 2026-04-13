@@ -553,6 +553,10 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.Controller = c
 	r.Cache = mgr.GetCache()
-	r.Recorder = mgr.GetEventRecorderFor("projection-controller")
+	// controller-runtime v0.23 deprecated this in favor of GetEventRecorder
+	// returning the new events.EventRecorder (k8s.io/client-go/tools/events).
+	// Migration requires changing every r.Recorder.Event(...) call to Eventf(...)
+	// and re-plumbing FakeRecorder in tests — defer to a focused PR.
+	r.Recorder = mgr.GetEventRecorderFor("projection-controller") //nolint:staticcheck // SA1019: legacy record.EventRecorder still works; migration deferred
 	return nil
 }
