@@ -1,0 +1,38 @@
+# Mirror a ConfigMap from one namespace into another.
+#
+# After applying this file:
+#   kubectl get projections
+#   kubectl get configmap -n tenant-a app-config -o yaml
+#
+# The destination ConfigMap will carry the same .data as the source plus
+# an ownership annotation `projection.be0x74a.io/owned-by`. Editing the
+# source propagates to the destination in ~100ms.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+data:
+  log_level: info
+  feature_flag: enabled
+---
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: app-config-to-tenant-a
+  namespace: default
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: app-config
+    namespace: default
+  destination:
+    namespace: tenant-a
+    # name omitted → defaults to source.name ("app-config")
