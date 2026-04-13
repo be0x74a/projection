@@ -5,6 +5,7 @@
 [![CI](https://github.com/be0x74a/projection/actions/workflows/ci.yml/badge.svg)](https://github.com/be0x74a/projection/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/be0x74a/projection?include_prereleases&sort=semver)](https://github.com/be0x74a/projection/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/be0x74a/projection)](https://goreportcard.com/report/github.com/be0x74a/projection)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/be0x74a/projection/badge)](https://scorecard.dev/viewer/?uri=github.com/be0x74a/projection)
 [![License](https://img.shields.io/github/license/be0x74a/projection)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/be0x74a/projection.svg)](https://pkg.go.dev/github.com/be0x74a/projection)
 
@@ -87,14 +88,14 @@ Pre-existing object at the destination? `Ready=False reason=DestinationConflict`
 
 ```bash
 helm install projection oci://ghcr.io/be0x74a/charts/projection \
-  --version 0.1.0-alpha \
+  --version 0.1.0-alpha.1 \
   --namespace projection-system --create-namespace
 ```
 
 ### `kubectl apply`
 
 ```bash
-kubectl apply -f https://github.com/be0x74a/projection/releases/download/v0.1.0-alpha/install.yaml
+kubectl apply -f https://github.com/be0x74a/projection/releases/download/v0.1.0-alpha.1/install.yaml
 ```
 
 Then create your first `Projection`:
