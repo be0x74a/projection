@@ -1,0 +1,181 @@
+# Observability
+
+`projection` exposes three signals. They are complementary, and you will want to use all three in production.
+
+## 1. Status conditions
+
+Every `Projection` carries three conditions. They are the primary source of truth — they're what `kubectl wait` and `kubectl get` surface.
+
+| Type                 | Meaning                                                                  |
+| -------------------- | ------------------------------------------------------------------------ |
+| `SourceResolved`     | Did the controller find the source object?                               |
+| `DestinationWritten` | Was the destination created or updated (or already in sync)?             |
+| `Ready`              | Aggregate; `True` iff both of the above are `True`.                      |
+
+### Querying
+
+Minimal — all conditions on one Projection:
+
+```bash
+kubectl -n <ns> get projection <name> \
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status} reason={.reason} msg={.message}{"\n"}{end}'
+```
+
+Just `Ready`:
+
+```bash
+kubectl -n <ns> get projection <name> \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+```
+
+Cluster-wide, tabular:
+
+```bash
+kubectl get projections -A -o json \
+  | jq -r '.items[] | [
+      .metadata.namespace,
+      .metadata.name,
+      (.status.conditions[]? | select(.type=="Ready") | .status + " (" + .reason + ")")
+    ] | @tsv'
+```
+
+CI-friendly wait (returns 0 once the mirror has taken):
+
+```bash
+kubectl -n <ns> wait --for=condition=Ready projection/<name> --timeout=60s
+```
+
+### Reasons you'll see
+
+| Condition            | Status  | Reason                                                                                                  |
+| -------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `SourceResolved`     | True    | `Resolved`                                                                                              |
+| `SourceResolved`     | False   | `SourceResolutionFailed` (RESTMapper can't find Kind), `SourceFetchFailed` (object not found / RBAC)    |
+| `DestinationWritten` | True    | `Projected`                                                                                             |
+| `DestinationWritten` | False   | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`   |
+| `DestinationWritten` | Unknown | `SourceNotResolved` (never attempted because source step failed)                                        |
+| `Ready`              | True    | `Projected`                                                                                             |
+| `Ready`              | False   | Mirrors whichever upstream condition failed (same reason & message)                                     |
+
+## 2. Kubernetes Events
+
+The controller emits Events on every state transition. They are the best way to see *history* — a status condition only shows the current state, but Events show what happened and when.
+
+| Event reason             | Type    | Trigger                                                                           |
+| ------------------------ | ------- | --------------------------------------------------------------------------------- |
+| `Projected`              | Normal  | Destination was created.                                                          |
+| `Updated`                | Normal  | Destination existed and was updated to match source (after `needsUpdate` diff).   |
+| `DestinationDeleted`     | Normal  | Destination was deleted as part of `Projection` deletion.                         |
+| `DestinationLeftAlone`   | Normal  | `Projection` was deleted but destination no longer had the ownership annotation.  |
+| `DestinationConflict`    | Warning | Destination existed and was not owned by this `Projection`.                       |
+| `SourceFetchFailed`      | Warning | Dynamic client `Get` on the source returned an error.                             |
+| `SourceResolutionFailed` | Warning | RESTMapper couldn't resolve `apiVersion`/`kind`.                                  |
+| `DestinationCreateFailed`| Warning | Create on destination failed.                                                     |
+| `DestinationUpdateFailed`| Warning | Update on destination failed.                                                     |
+| `DestinationFetchFailed` | Warning | Get on an existing destination failed during reconcile.                           |
+
+### Querying
+
+All events for one Projection:
+
+```bash
+kubectl -n <ns> get events \
+  --field-selector involvedObject.name=<projection-name>,involvedObject.kind=Projection \
+  --sort-by=.lastTimestamp
+```
+
+All Warnings cluster-wide (use this in an on-call runbook):
+
+```bash
+kubectl get events -A --field-selector type=Warning \
+  --sort-by=.lastTimestamp \
+  | grep Projection
+```
+
+## 3. Prometheus metrics
+
+The controller registers `projection_reconcile_total`, a `CounterVec` labeled by `result`:
+
+```
+projection_reconcile_total{result="success"}
+projection_reconcile_total{result="conflict"}
+projection_reconcile_total{result="source_error"}
+projection_reconcile_total{result="destination_error"}
+```
+
+Plus the usual controller-runtime metrics (`controller_runtime_reconcile_total`, `workqueue_depth`, etc.).
+
+### Scraping
+
+The metrics endpoint is **secure by default** — authn/authz-filtered, TLS-wrapped, on `:8443/metrics`. If you're running the supplied Helm chart or install manifest, a `ClusterRole` named `projection-metrics-reader` is provisioned for you to bind to your Prometheus service account:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: projection-metrics-reader-prom
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: projection-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-k8s           # or your scraper's SA
+    namespace: monitoring
+```
+
+If you use the `PrometheusOperator`, the install ships a `ServiceMonitor` scraping `:8443/metrics` over HTTPS with the operator's serving cert.
+
+Pass `--metrics-bind-address=0` at startup to disable the endpoint entirely. Pass `--metrics-secure=false` to downgrade to plain HTTP on `:8080` (not recommended).
+
+### Sample alerts
+
+```yaml
+# Any projection-side error in the last 5 min
+- alert: ProjectionReconcileErrors
+  expr: sum by (result) (rate(projection_reconcile_total{result=~".*_error"}[5m])) > 0
+  for: 5m
+  labels: { severity: warning }
+  annotations:
+    summary: "projection controller reporting {{ $labels.result }} at {{ $value | humanize }}/s"
+
+# Destination conflicts — probably someone else owns the destination
+- alert: ProjectionConflicts
+  expr: rate(projection_reconcile_total{result="conflict"}[15m]) > 0
+  for: 15m
+  labels: { severity: warning }
+  annotations:
+    summary: "Persistent DestinationConflict — a Projection is being blocked by an unowned destination"
+
+# Success should dominate — ratio alert
+- alert: ProjectionSuccessRateLow
+  expr: |
+    sum(rate(projection_reconcile_total{result="success"}[15m]))
+      /
+    sum(rate(projection_reconcile_total[15m])) < 0.95
+  for: 15m
+  labels: { severity: warning }
+  annotations:
+    summary: "projection reconcile success rate below 95% (15m)"
+```
+
+## One-shot snapshot
+
+The repo ships [`hack/observe.sh`](https://github.com/be0x74a/projection/blob/main/hack/observe.sh) as a copy-paste debugging helper. It dumps:
+
+- Cluster info and nodes.
+- Operator pod and the last 80 lines of controller logs.
+- `kubectl get projections -A`.
+- Per-Projection condition summary.
+- Recent events in `projection-system`.
+- Optionally, full YAML of one `Projection` plus its source and destination.
+
+```bash
+# Overall snapshot
+./hack/observe.sh
+
+# Deep dive on a single Projection
+./hack/observe.sh app-config-to-tenant-a default
+```
+
+It honors `KUBECTL_CONTEXT` (default `kind-projection-dev`) so you can point it at any kubeconfig context.
