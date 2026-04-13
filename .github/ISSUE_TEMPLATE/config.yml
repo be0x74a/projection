@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/be0x74a/projection/discussions
+    about: For usage questions, ideas, or general discussion.
+  - name: Security vulnerability
+    url: https://github.com/be0x74a/projection/security/advisories/new
+    about: Report a security issue privately.
