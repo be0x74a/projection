@@ -28,6 +28,10 @@ A few Kinds carry **apiserver-allocated spec fields** that must be stripped befo
 
 If you hit an error like `spec.FIELD: field is immutable` when mirroring a Kind not on this list, you've found a gap — file an issue with the Kind and field, and we'll add an entry. The cost of a missing entry is a clean failure with an actionable error message; the cost of a wrong entry is silently dropping user data. The bar for adding entries is deliberately conservative.
 
+### Namespaced resources only
+
+`projection` mirrors only **namespaced** resources (`ConfigMap`, `Secret`, `Service`, `Deployment`, most CRs, etc.). A `Projection` that points at a cluster-scoped Kind (`Namespace`, `ClusterRole`, `ClusterRoleBinding`, `StorageClass`, `CustomResourceDefinition`, `PriorityClass`, …) fails fast with `SourceResolved=False` and the message `<apiVersion>/<Kind> is cluster-scoped; projection only mirrors namespaced resources`. There's no use case that motivated cluster-scoped support so far (there can only be one `Namespace` with a given name in a cluster, so mirroring it doesn't mean anything), and the reconcile/watch plumbing assumes a namespace for the source object.
+
 ### Alpha API
 
 The CRD stability is alpha. `projection.be0x74a.io/v1` is the storage version, and we'll serve later versions alongside with conversion when/if they land — but breaking changes to spec shape are allowed pre-1.0. We'll announce changes in the [changelog](https://github.com/be0x74a/projection/blob/main/CHANGELOG.md) and in release notes with migration guidance.

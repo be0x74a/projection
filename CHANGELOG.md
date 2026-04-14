@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `resolveGVR` now fails fast with a clear message when a `Projection` points at a cluster-scoped Kind (e.g. `Namespace`, `ClusterRole`, `StorageClass`). Previously the dynamic client would issue a malformed URL and surface a confusing 404 as `SourceFetchFailed`; now the same case reports `SourceResolved=False` with message `<apiVersion>/<Kind> is cluster-scoped; projection only mirrors namespaced resources`.
+
 ### ⚠ BREAKING CHANGES
 
 - The default **source-mode** is now `allowlist`. Source objects must carry
