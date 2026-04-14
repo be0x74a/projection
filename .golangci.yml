@@ -25,6 +25,7 @@ issues:
         - unparam
         - dupl
         - lll
+        - goconst
 linters:
   disable-all: true
   enable:
