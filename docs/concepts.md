@@ -126,7 +126,37 @@ Each step in plain prose:
 
 On any failure the corresponding condition flips to `False` (or `Unknown` for writes that never happened because the source side failed), a `Warning` event fires, and the metric increments with the right `result` label. The periodic `RequeueAfter` of 30 s on the error path is a safety net; the dynamic source watch is authoritative for the happy path.
 
-## 7. Watches
+## 7. Source projectability policy
+
+Because the operator holds cluster-wide read RBAC, anyone authorized to create a `Projection` could, in principle, read any resource in the cluster via the controller. The source-projectability policy is the user-facing defense against that — source owners get to declare whether their object is eligible for projection.
+
+**Controller-level mode** — a single cluster-admin-configured flag:
+
+| Mode | Behavior |
+|---|---|
+| `allowlist` (default) | Source must carry `projection.be0x74a.io/projectable: "true"`. Missing or other values are treated as not projectable. |
+| `permissive` | Any source is projectable *unless* it carries the veto annotation. |
+
+Set via the CLI flag `--source-mode=permissive|allowlist` (or the Helm value `sourceMode`).
+
+**Source-owner veto** — always honored regardless of mode:
+
+```yaml
+metadata:
+  annotations:
+    projection.be0x74a.io/projectable: "false"    # hard stop
+```
+
+When a previously-projected source flips to `"false"`, the destination is **garbage-collected on the next reconcile** — owners retract, not just block future copies.
+
+**Status reasons** to recognize:
+
+- `SourceResolved=False reason=SourceOptedOut` — source explicitly vetoed with `"false"`.
+- `SourceResolved=False reason=SourceNotProjectable` — allowlist mode, no `"true"` annotation present.
+
+**Honest limitation**: this is a *policy* control, not a true isolation boundary. The controller still has cluster-wide read RBAC, so a compromised operator pod (or a malicious `Projection` created by a privileged user who can bypass admission policy) is not constrained by the annotation. True end-to-end enforcement would require dynamically narrowing the controller's RBAC per declared source Kind — a future direction, not v0.1.
+
+## 8. Watches
 
 - No source watch is declared at startup. The controller starts with only a watch on `Projection` itself.
 - The first reconcile for a given source GVK registers a dynamic, **metadata-only** source watch (we don't need the full object — events just enqueue Projections, the next reconcile fetches fresh).

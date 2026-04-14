@@ -24,6 +24,9 @@ metadata:
   labels:
     env: prod
     tenant: shared
+  annotations:
+    # Opt-in required by the default allowlist source-mode.
+    projection.be0x74a.io/projectable: "true"
 data:
   endpoint: https://api.example.com
 ---

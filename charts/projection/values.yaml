@@ -52,6 +52,21 @@ healthProbe:
   # -- Address the health probe endpoint binds to. Format: host:port.
   bindAddress: ":8081"
 
+# -- Source projectability policy. Controls which source objects the
+# controller is willing to mirror. See docs/concepts.md for a deeper
+# discussion of the trade-offs.
+#
+#   "allowlist" (default, secure-by-default): every source object must
+#     carry the annotation projection.be0x74a.io/projectable="true". Matches
+#     the pattern used by emberstack/Reflector.
+#   "permissive": any source is projectable unless explicitly opted out.
+#     Closer to the v0.1.0-alpha.1 behavior and appropriate for clusters
+#     where Projection CR creation is already tightly locked down.
+#
+# Regardless of mode, an annotation value of "false" is always honored
+# as a source-owner veto — the source owner's escape hatch.
+sourceMode: allowlist
+
 # -- Resource requests and limits for the controller container.
 # Sensible defaults for a single-tenant operator; tune for your workload.
 resources:

@@ -18,6 +18,11 @@ kind: ConfigMap
 metadata:
   name: app-config
   namespace: default
+  annotations:
+    # Source owner opts this ConfigMap in to projection. Required under the
+    # default allowlist source-mode; harmless in permissive mode. Setting
+    # this to "false" is always honored as an opt-out veto.
+    projection.be0x74a.io/projectable: "true"
 data:
   log_level: info
   feature_flag: enabled

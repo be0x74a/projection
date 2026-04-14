@@ -38,6 +38,10 @@ kind: ConfigMap
 metadata:
   name: app-config
   namespace: platform
+  annotations:
+    # Source opts in to projection (default source-mode is "allowlist").
+    # Set to "false" to veto projection as the source owner.
+    projection.be0x74a.io/projectable: "true"
 data:
   log_level: info
 ---

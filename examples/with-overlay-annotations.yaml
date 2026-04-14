@@ -19,6 +19,9 @@ kind: ConfigMap
 metadata:
   name: feature-flags
   namespace: platform
+  annotations:
+    # Opt-in required by the default allowlist source-mode.
+    projection.be0x74a.io/projectable: "true"
 data:
   experimental_search: "true"
 ---

@@ -58,6 +58,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var sourceModeFlag string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -69,6 +70,13 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&sourceModeFlag, "source-mode", "allowlist",
+		"Policy for which source objects are projectable. "+
+			"\"allowlist\" (default) requires the source to carry annotation "+
+			"projection.be0x74a.io/projectable=\"true\". "+
+			"\"permissive\" allows any source. "+
+			"An annotation value of \"false\" is always honored as an opt-out "+
+			"regardless of mode.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -149,11 +157,24 @@ func main() {
 		setupLog.Error(err, "unable to create dynamic client")
 		os.Exit(1)
 	}
+	var sourceMode controller.SourceMode
+	switch sourceModeFlag {
+	case string(controller.SourceModePermissive):
+		sourceMode = controller.SourceModePermissive
+	case string(controller.SourceModeAllowlist):
+		sourceMode = controller.SourceModeAllowlist
+	default:
+		setupLog.Error(nil, "invalid --source-mode; must be \"permissive\" or \"allowlist\"",
+			"value", sourceModeFlag)
+		os.Exit(1)
+	}
+	setupLog.Info("source projectability policy", "source-mode", sourceMode)
 	if err = (&controller.ProjectionReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		DynamicClient: dynamicClient,
 		RESTMapper:    mgr.GetRESTMapper(),
+		SourceMode:    sourceMode,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Projection")
 		os.Exit(1)
