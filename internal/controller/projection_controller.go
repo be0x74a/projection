@@ -47,9 +47,10 @@ import (
 )
 
 const (
-	finalizerName     = "projection.be0x74a.io/finalizer"
-	ownedByAnnotation = "projection.be0x74a.io/owned-by"
-	requeueInterval   = 30 * time.Second
+	finalizerName         = "projection.be0x74a.io/finalizer"
+	ownedByAnnotation     = "projection.be0x74a.io/owned-by"
+	projectableAnnotation = "projection.be0x74a.io/projectable"
+	requeueInterval       = 30 * time.Second
 
 	conditionReady              = "Ready"
 	conditionSourceResolved     = "SourceResolved"
@@ -61,6 +62,23 @@ const (
 	sourceIndex = "spec.sourceKey"
 )
 
+// SourceMode controls which source objects the operator is willing to
+// project. Configured once per controller via the --source-mode flag.
+type SourceMode string
+
+const (
+	// SourceModePermissive allows any source object to be projected. Source
+	// owners can still veto individual objects with the
+	// projection.be0x74a.io/projectable="false" annotation.
+	SourceModePermissive SourceMode = "permissive"
+
+	// SourceModeAllowlist requires every source object to carry the
+	// projection.be0x74a.io/projectable="true" annotation before it can be
+	// mirrored. This is the default — Kubernetes convention favors
+	// opt-in for cluster-scoped operators with broad read RBAC.
+	SourceModeAllowlist SourceMode = "allowlist"
+)
+
 // ProjectionReconciler reconciles a Projection object.
 type ProjectionReconciler struct {
 	client.Client
@@ -68,6 +86,10 @@ type ProjectionReconciler struct {
 	DynamicClient dynamic.Interface
 	RESTMapper    apimeta.RESTMapper
 	Recorder      record.EventRecorder
+
+	// SourceMode is the cluster-admin-configured policy for which source
+	// objects are projectable. Empty string defaults to SourceModeAllowlist.
+	SourceMode SourceMode
 
 	// Controller is the underlying controller.Controller we built in
 	// SetupWithManager. We need it so Reconcile can register new source
@@ -155,6 +177,19 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		Get(ctx, proj.Spec.Source.Name, metav1.GetOptions{})
 	if err != nil {
 		return r.failSource(ctx, proj, "SourceFetchFailed", err.Error())
+	}
+
+	// Opt-in / opt-out policy. If the source says it's not projectable (or
+	// didn't opt in under allowlist mode), clean up any destination we
+	// previously created and stop.
+	if reason, msg, ok := r.checkSourceProjectable(source); !ok {
+		if delErr := r.deleteDestination(ctx, proj); delErr != nil {
+			logger.Error(delErr, "cleaning up destination after opt-out",
+				"reason", reason)
+			// Don't fail on cleanup error — log and surface the policy
+			// failure as the primary reason.
+		}
+		return r.failSource(ctx, proj, reason, msg)
 	}
 
 	dst := buildDestination(source, proj)
@@ -318,6 +353,43 @@ func destinationCoords(proj *projectionv1.Projection) (namespace, name string) {
 
 func isOwnedBy(obj *unstructured.Unstructured, proj *projectionv1.Projection) bool {
 	return obj.GetAnnotations()[ownedByAnnotation] == proj.Namespace+"/"+proj.Name
+}
+
+// checkSourceProjectable decides whether a freshly-fetched source object is
+// allowed to be projected, based on the configured SourceMode and the
+// source's projectable annotation.
+//
+//   - Annotation = "false" is always a veto, regardless of mode. This is the
+//     source owner's escape hatch.
+//   - Annotation = "true" always allows projection.
+//   - Anything else (missing, empty, other string): blocked under
+//     SourceModeAllowlist (the default), allowed under SourceModePermissive.
+//
+// Returns (reason, message, ok). When ok is false, the caller should treat
+// this as a SourceResolved=False condition with the returned reason and
+// message; reason matches the expected scorecard/status vocabulary so
+// external tooling can filter.
+func (r *ProjectionReconciler) checkSourceProjectable(source *unstructured.Unstructured) (reason, message string, ok bool) {
+	val, hasAnnotation := source.GetAnnotations()[projectableAnnotation]
+
+	if hasAnnotation && val == "false" {
+		return "SourceOptedOut",
+			fmt.Sprintf("source %s/%s has %s=\"false\"; owner has opted out of projection",
+				source.GetNamespace(), source.GetName(), projectableAnnotation),
+			false
+	}
+
+	mode := r.SourceMode
+	if mode == "" {
+		mode = SourceModeAllowlist
+	}
+	if mode == SourceModeAllowlist && val != "true" {
+		return "SourceNotProjectable",
+			fmt.Sprintf("source-mode=allowlist requires annotation %s=\"true\" on source %s/%s",
+				projectableAnnotation, source.GetNamespace(), source.GetName()),
+			false
+	}
+	return "", "", true
 }
 
 // preserveAPIServerAllocatedFields copies fields the apiserver assigns on

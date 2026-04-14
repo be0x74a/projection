@@ -14,6 +14,17 @@ The operator ships with a `ClusterRole` granting it `*/*` — every `verb` on ev
 
 The trade-off is real: a misconfigured or malicious `Projection` can cause the controller to **read** any Secret in the cluster and **write** it to a different namespace. Anyone who can create `Projection` CRs in *any* namespace can effectively exfiltrate data across namespaces they otherwise couldn't access directly.
 
+## Source projectability policy
+
+The primary user-facing defense is the **source projectability policy**, documented in detail in [Concepts § 7](concepts.md#7-source-projectability-policy). The defaults:
+
+- **`--source-mode=allowlist`** (default). Sources must carry the annotation `projection.be0x74a.io/projectable: "true"` to be mirrored. A `Projection` pointing at an unannotated source gets `SourceResolved=False reason=SourceNotProjectable` in status.
+- **Source owner veto**: annotation value `"false"` is *always* honored regardless of mode. Post-hoc veto garbage-collects the existing destination.
+
+This shifts the trust model from "anyone with Projection-create rights reads everything" to "source owners decide what's projectable." Clusters that want the historic wide-open behavior can set `--source-mode=permissive` explicitly.
+
+Note this is a **policy** control, not an isolation boundary (the controller still has cluster-wide read RBAC). Pair it with admission policy (Kyverno, OPA) constraining *who* can add the `projectable=true` annotation for defense-in-depth.
+
 ## Hardening recommendations
 
 ### 1. Narrow the controller's RBAC to the Kinds you actually mirror

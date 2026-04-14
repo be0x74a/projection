@@ -59,6 +59,7 @@ spec:
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
             {{- end }}
+            - --source-mode={{ .Values.sourceMode }}
           ports:
             {{- if .Values.metrics.enabled }}
             - name: metrics

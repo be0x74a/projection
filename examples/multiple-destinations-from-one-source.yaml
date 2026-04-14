@@ -26,6 +26,9 @@ kind: ConfigMap
 metadata:
   name: org-policy
   namespace: platform
+  annotations:
+    # Opt-in required by the default allowlist source-mode.
+    projection.be0x74a.io/projectable: "true"
 data:
   retention_days: "30"
   region: eu-west-1

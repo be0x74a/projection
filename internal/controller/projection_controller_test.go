@@ -158,9 +158,10 @@ var _ = Describe("Projection Controller (integration)", func() {
 
 			src := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      sourceCMName,
-					Namespace: sourceNS,
-					Labels:    map[string]string{"src-label": "src-val"},
+					Name:        sourceCMName,
+					Namespace:   sourceNS,
+					Labels:      map[string]string{"src-label": "src-val"},
+					Annotations: map[string]string{projectableAnnotation: "true"},
 				},
 				Data: map[string]string{"key1": "value1"},
 			}
@@ -277,8 +278,12 @@ var _ = Describe("Projection Controller (integration)", func() {
 			ensureNamespace(ns)
 
 			src := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{Name: sourceCMName, Namespace: ns},
-				Data:       map[string]string{"from": "source"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        sourceCMName,
+					Namespace:   ns,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"from": "source"},
 			}
 			Expect(k8sClient.Create(ctx, src)).To(Succeed())
 
@@ -368,8 +373,12 @@ var _ = Describe("Projection Controller (integration)", func() {
 			ensureNamespace(ns)
 
 			src := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{Name: sourceCMName, Namespace: ns},
-				Data:       map[string]string{"k": "v"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        sourceCMName,
+					Namespace:   ns,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"k": "v"},
 			}
 			Expect(k8sClient.Create(ctx, src)).To(Succeed())
 		})
@@ -461,6 +470,110 @@ var _ = Describe("Projection Controller (integration)", func() {
 				err := k8sClient.Get(ctx, projKey, &projectionv1.Projection{})
 				return apierrors.IsNotFound(err)
 			}).Should(BeTrue())
+		})
+	})
+
+	Context("Source projectability policy", func() {
+		It("refuses to project a source missing the projectable annotation in allowlist mode", func() {
+			ns := uniqueNS("mirror-policy-allowlist")
+			ensureNamespace(ns)
+
+			// Source without the projectable annotation.
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "unblessed-cm", Namespace: ns},
+				Data:       map[string]string{"x": "y"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			projKey := types.NamespacedName{Name: "p-allowlist", Namespace: ns}
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: src.Name, Namespace: ns,
+					},
+					Destination: projectionv1.DestinationRef{Name: "dst-never-written"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			DeferCleanup(func() { deleteProjection(projKey) })
+
+			// Reconciler defaults to allowlist (empty SourceMode).
+			reconcileUntilSteady(r, projKey, 5)
+
+			// Projection surfaces SourceResolved=False with SourceNotProjectable reason.
+			var got projectionv1.Projection
+			Expect(k8sClient.Get(ctx, projKey, &got)).To(Succeed())
+			Expect(got.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", Equal(conditionSourceResolved)),
+				HaveField("Status", Equal(metav1.ConditionFalse)),
+				HaveField("Reason", Equal("SourceNotProjectable")),
+			)))
+			// No destination was created.
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "dst-never-written", Namespace: ns},
+				&corev1.ConfigMap{})).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
+		})
+
+		It("honors opt-out (false) even in permissive mode, garbage-collecting an existing destination", func() {
+			ns := uniqueNS("mirror-policy-optout")
+			ensureNamespace(ns)
+
+			// Initially projectable.
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "toggle-cm",
+					Namespace:   ns,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"v": "1"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			projKey := types.NamespacedName{Name: "p-optout", Namespace: ns}
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: src.Name, Namespace: ns,
+					},
+					Destination: projectionv1.DestinationRef{Name: "mirrored-cm"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			DeferCleanup(func() { deleteProjection(projKey) })
+
+			// Run in permissive mode to prove the opt-out veto still fires.
+			r.SourceMode = SourceModePermissive
+			reconcileUntilSteady(r, projKey, 5)
+
+			dstKey := types.NamespacedName{Name: "mirrored-cm", Namespace: ns}
+			Expect(k8sClient.Get(ctx, dstKey, &corev1.ConfigMap{})).To(Succeed(),
+				"destination should exist after the initial projection")
+
+			// Source owner opts out.
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: src.Name, Namespace: ns}, src)).To(Succeed())
+			src.Annotations[projectableAnnotation] = "false"
+			Expect(k8sClient.Update(ctx, src)).To(Succeed())
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: projKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// The existing destination should be garbage-collected.
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, dstKey, &corev1.ConfigMap{})
+				return apierrors.IsNotFound(err)
+			}).Should(BeTrue(), "destination should be cleaned up after opt-out")
+
+			// Status reflects SourceOptedOut.
+			var got projectionv1.Projection
+			Expect(k8sClient.Get(ctx, projKey, &got)).To(Succeed())
+			Expect(got.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", Equal(conditionSourceResolved)),
+				HaveField("Status", Equal(metav1.ConditionFalse)),
+				HaveField("Reason", Equal("SourceOptedOut")),
+			)))
 		})
 	})
 })

@@ -131,6 +131,8 @@ kind: ConfigMap
 metadata:
   name: %s
   namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
 data:
   color: blue
   shape: square
@@ -195,6 +197,8 @@ kind: Service
 metadata:
   name: %s
   namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
 spec:
   selector:
     app: echo
@@ -277,6 +281,8 @@ kind: ConfigMap
 metadata:
   name: %s
   namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
 data:
   origin: projection
 `, cmName, srcNS))).To(Succeed())
@@ -350,6 +356,8 @@ kind: ConfigMap
 metadata:
   name: %s
   namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
 data:
   version: "1"
 `, cmName, srcNS))).To(Succeed())
@@ -409,6 +417,8 @@ kind: ConfigMap
 metadata:
   name: %s
   namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
 data:
   k: v
 `, cmName, srcNS))).To(Succeed())
@@ -473,6 +483,8 @@ kind: ConfigMap
 metadata:
   name: %s
   namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
 data:
   k: v
 `, cmName, srcNS))).To(Succeed())
