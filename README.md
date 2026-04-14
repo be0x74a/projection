@@ -6,6 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/be0x74a/projection?include_prereleases&sort=semver)](https://github.com/be0x74a/projection/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/be0x74a/projection)](https://goreportcard.com/report/github.com/be0x74a/projection)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/be0x74a/projection/badge)](https://scorecard.dev/viewer/?uri=github.com/be0x74a/projection)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12533/badge)](https://www.bestpractices.dev/projects/12533)
 [![License](https://img.shields.io/github/license/be0x74a/projection)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/be0x74a/projection.svg)](https://pkg.go.dev/github.com/be0x74a/projection)
 
