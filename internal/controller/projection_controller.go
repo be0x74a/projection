@@ -304,6 +304,18 @@ func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.Gr
 	if err != nil {
 		return schema.GroupVersionResource{}, fmt.Errorf("resolving %s/%s: %w", src.APIVersion, src.Kind, err)
 	}
+	// Projection only mirrors namespaced resources. Cluster-scoped Kinds
+	// (Namespace, ClusterRole, StorageClass, CRDs, PriorityClass, ...)
+	// either don't make sense to mirror (there can only be one Namespace
+	// with a given name in a cluster) or would need a different code path
+	// (dynamic-client .Namespace() on a cluster-scoped resource produces
+	// a nonsensical URL that the apiserver 404s on). Fail fast with a
+	// clear message rather than surfacing the 404 downstream.
+	if mapping.Scope.Name() != apimeta.RESTScopeNameNamespace {
+		return schema.GroupVersionResource{}, fmt.Errorf(
+			"%s/%s is cluster-scoped; projection only mirrors namespaced resources",
+			src.APIVersion, src.Kind)
+	}
 	return mapping.Resource, nil
 }
 
