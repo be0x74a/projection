@@ -2,17 +2,17 @@
 
 Six worked examples, all shipped as-is in the repo under [`examples/`](https://github.com/be0x74a/projection/tree/main/examples). Each section below quotes the interesting bits; follow the links for the full manifests (the examples include namespace scaffolding, illustrative ConfigMaps/Secrets, etc.).
 
-## 1. `ConfigMap` across namespaces
+## 1. `ConfigMap` fan-out across namespaces
 
-**File:** [`examples/configmap-cross-namespace.yaml`](https://github.com/be0x74a/projection/blob/main/examples/configmap-cross-namespace.yaml)
+**File:** [`examples/configmap-fan-out-selector.yaml`](https://github.com/be0x74a/projection/blob/main/examples/configmap-fan-out-selector.yaml)
 
-The canonical "same config, many namespaces" case. One `Projection` per destination namespace.
+The canonical "same config, many namespaces" case. One `Projection` mirrors the source into every namespace carrying a matching label.
 
 ```yaml
 apiVersion: projection.be0x74a.io/v1
 kind: Projection
 metadata:
-  name: app-config-to-tenant-a
+  name: app-config-fanout
   namespace: default
 spec:
   source:
@@ -21,19 +21,23 @@ spec:
     name: app-config
     namespace: default
   destination:
-    namespace: tenant-a
-    # name omitted → defaults to source.name ("app-config")
+    namespaceSelector:
+      matchLabels:
+        projection.be0x74a.io/mirror: "true"
+    # name omitted → defaults to source.name ("app-config") in every matching namespace
 ```
 
-**Expected outcome:** `configmap/app-config` appears in `tenant-a` with the same `.data` plus `projection.be0x74a.io/owned-by: default/app-config-to-tenant-a`. Edits to the source propagate in ~100 ms.
+**Expected outcome:** `configmap/app-config` appears in every labeled namespace with the same `.data` plus `projection.be0x74a.io/owned-by: default/app-config-fanout`. Edits to the source propagate to all destinations in ~100 ms. Labeling a new namespace triggers a reconcile and the destination appears there too; removing the label cleans up the destination.
 
-**Gotchas:** if `tenant-a` already has a `ConfigMap/app-config` that doesn't carry the ownership annotation, the Projection reports `Ready=False reason=DestinationConflict` and makes no change.
+**Gotchas:** if any matching namespace already has an unowned `ConfigMap/app-config`, the Projection reports `DestinationWritten=False reason=DestinationConflict` for that namespace (other namespaces still get their destinations). The conflict message identifies which namespace is problematic.
+
+**When to pick single namespace instead:** if you need per-destination overlays (e.g. a `tenant:` label distinct per namespace), one `Projection` per destination is still the right shape — see [`examples/multiple-destinations-from-one-source.yaml`](https://github.com/be0x74a/projection/blob/main/examples/multiple-destinations-from-one-source.yaml).
 
 ## 2. `Secret` across namespaces
 
 **File:** [`examples/secret-cross-namespace.yaml`](https://github.com/be0x74a/projection/blob/main/examples/secret-cross-namespace.yaml)
 
-The distribute-a-TLS-cert scenario — typically the source `Secret` is authored by `cert-manager`, `external-secrets`, or `sealed-secrets`.
+The distribute-a-TLS-cert scenario — typically the source `Secret` is authored by `cert-manager`, `external-secrets`, or `sealed-secrets`. When the destination is a single namespace you can set `namespace` directly; when the cert should reach every labeled namespace, use `namespaceSelector` as in use case 1.
 
 ```yaml
 apiVersion: projection.be0x74a.io/v1

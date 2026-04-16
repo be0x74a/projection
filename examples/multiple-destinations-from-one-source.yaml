@@ -1,10 +1,14 @@
-# Mirror one source into multiple destinations.
+# Mirror one source into multiple destinations, one Projection per target.
 #
-# v0 has one destination per Projection — declare a Projection per
-# destination namespace. Multi-destination via label selector is on the
-# roadmap, but this pattern works today and gives you per-destination
-# status independently (one DestinationConflict in tenant-c won't mark
-# the others as failed).
+# This pattern is preferred when each destination needs a *distinct overlay*
+# (here: a different `tenant:` label). For uniform fan-out (same overlay
+# everywhere) use `destination.namespaceSelector` — see
+# `configmap-fan-out-selector.yaml` — which covers all matching namespaces
+# with a single Projection and a rollup status.
+#
+# With one Projection per destination you still get per-destination status
+# independently (one DestinationConflict in tenant-c won't mark the others
+# as failed), at the cost of more YAML.
 ---
 apiVersion: v1
 kind: Namespace

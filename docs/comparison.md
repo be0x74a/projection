@@ -8,8 +8,9 @@ There are two mature tools that overlap with `projection`: [emberstack/Reflector
 | ---------------------------------------- | --------------------------------------- | ------------------------------------------- | ---------------------------------------------------- |
 | **Scope of supported Kinds**             | Any (RESTMapper-driven)                 | `ConfigMap`, `Secret` only                  | Any                                                  |
 | **Source-of-truth shape**                | A `Projection` CR per mirror            | Annotations on the source object            | A cluster-wide `ClusterPolicy`/`Policy`              |
-| **Per-mirror status / conditions**       | Yes (`Ready`, `SourceResolved`, `DestinationWritten`) | Partial (reflected on source annotations) | No (policy-level, not mirror-level)         |
-| **Kubernetes Events per outcome**        | `Projected`, `Updated`, `DestinationConflict`, `SourceFetchFailed`, ... | Limited       | Policy-engine events                                 |
+| **Multi-namespace fan-out**              | Yes, via `destination.namespaceSelector` (label-based) | Yes, via `reflection-auto-namespaces` (regex-based) | Yes, via policy match selectors                      |
+| **Per-mirror status / conditions**       | Yes (`Ready`, `SourceResolved`, `DestinationWritten` — rollup for selector-based) | Partial (reflected on source annotations) | No (policy-level, not mirror-level)         |
+| **Kubernetes Events per outcome**        | `Projected`, `Updated`, `DestinationConflict`, `SourceFetchFailed`, ... (per-namespace for fan-out) | Limited | Policy-engine events                                 |
 | **Conflict semantics**                   | Refuses to overwrite unowned objects; reports `DestinationConflict` | Overwrites | Configurable via `synchronize`, generally overwrites |
 | **Watch-driven propagation**             | Yes, dynamic per-GVK metadata-only watch | Yes                                         | Yes                                                  |
 | **Admission-time source validation**     | Yes (pattern-validated source fields)   | n/a                                         | Yes                                                  |
@@ -23,7 +24,7 @@ The biggest difference is **where the rule lives**.
 
 - **Reflector** puts the rule on the *source object*: you annotate a Secret with `reflector.v1.k8s.emberstack.com/reflection-allowed: "true"` and `reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: "tenant-.*"`. The "who's mirroring this?" question is answered by listing annotations on the source.
 - **Kyverno** puts the rule in a *cluster-wide policy*: one `ClusterPolicy` can generate mirrored objects based on selectors, triggers, and JMESPath expressions. Reading "how did this object get here?" means finding the right policy.
-- **projection** puts the rule in a *per-mirror CR*: one `Projection` = one source → one destination. Reading "how did this object get here?" means `kubectl describe projection` on any suspect namespace.
+- **projection** puts the rule in a *per-mirror CR*: one `Projection` maps one source to either one destination or — with `destination.namespaceSelector` — to every namespace matching a label. Reading "how did this object get here?" means `kubectl describe projection` on any suspect namespace.
 
 Consequence: `projection` is the easiest to diff in GitOps (each mirror is its own YAML file) and the easiest to reason about per-resource (`kubectl get projections -A` is the full inventory). Reflector is the easiest when you already manage the *source* in GitOps and don't want to create another object per destination. Kyverno is the most powerful when the mirror rule needs to match on dozens of sources at once.
 
@@ -63,8 +64,8 @@ All three are watch-driven; steady-state propagation is sub-second in all three.
 
 ## When to pick which
 
-- **You already run Reflector and only mirror Secrets.** Keep Reflector. The added per-mirror CR isn't worth the churn.
-- **You already run Kyverno and want to mirror *based on source labels* (one policy generating many destinations).** Stick with Kyverno — `projection` doesn't do source selectors yet.
+- **You already run Reflector and only mirror Secrets.** Keep Reflector. The added per-mirror CR isn't worth the churn — though note that `projection`'s `destination.namespaceSelector` gives you Reflector-style fan-out with per-namespace status.
+- **You already run Kyverno and want to mirror *based on source labels* (one policy generating many destinations from multiple sources).** Stick with Kyverno — `projection` doesn't do source selectors yet, only destination namespace selectors.
 - **You want the mirror rule to be a first-class, diffable, per-destination object you can `kubectl get` and wait on — and you need Kinds beyond ConfigMap/Secret.** That's `projection`.
 - **You want conflict-safe-by-default** (refuses to overwrite unowned objects). That's `projection`; the others generally don't do this.
 - **You want per-mirror status conditions and a Prometheus counter you can alert on.** That's `projection`.
