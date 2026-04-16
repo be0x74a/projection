@@ -47,12 +47,22 @@ type SourceRef struct {
 }
 
 // DestinationRef identifies where the projected object should be written.
+// Invariant: namespace and namespaceSelector are mutually exclusive. Enforced
+// by the reconciler rather than a CEL rule because older apiserver versions
+// (k8s 1.31 and earlier) can't resolve `self.namespace` in x-kubernetes-validations
+// for plain-string fields with omitempty, producing "undefined field" errors at
+// CRD install time.
 type DestinationRef struct {
 	// Namespace to project into. Defaults to the Projection's own namespace.
+	// Mutually exclusive with NamespaceSelector.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Namespace string `json:"namespace,omitempty"`
+	// NamespaceSelector selects namespaces to project into by label.
+	// Mutually exclusive with Namespace.
+	// +optional
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 	// Name in the destination namespace. Defaults to Source.Name.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63

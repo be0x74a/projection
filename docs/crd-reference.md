@@ -20,12 +20,17 @@ Identifies the object to mirror. All four fields are required.
 
 ## `spec.destination` (optional)
 
-Where the mirrored object is written. Both fields are optional; leaving them unset produces sensible defaults.
+Where the mirrored object is written. All fields are optional; leaving them unset produces sensible defaults.
 
-| Field       | Type   | Required | Default                     | Validation                                                                   | Description                                          |
-| ----------- | ------ | -------- | --------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `namespace` | string | no       | The Projection's own namespace | `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`                | Namespace to project into.                           |
-| `name`      | string | no       | `spec.source.name`          | `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`                    | Name at the destination.                             |
+| Field               | Type                   | Required | Default                        | Validation                                                                   | Description                                                                                                    |
+| ------------------- | ---------------------- | -------- | ------------------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `namespace`         | string                 | no       | The Projection's own namespace | `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`                    | Single destination namespace. Mutually exclusive with `namespaceSelector`.                                     |
+| `namespaceSelector` | `metav1.LabelSelector` | no       | —                              | Standard label selector (matchLabels/matchExpressions)                       | Fan-out: project into every namespace matching the selector. Mutually exclusive with `namespace`.              |
+| `name`              | string                 | no       | `spec.source.name`             | `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`                    | Name at each destination.                                                                                      |
+
+Setting both `namespace` and `namespaceSelector` is rejected by the reconciler with `DestinationWritten=False reason=InvalidSpec`. (This invariant is enforced controller-side rather than via CEL for cross-apiserver-version compatibility.)
+
+When `namespaceSelector` is set, the controller projects into every matching namespace and cleans up destinations in namespaces that stop matching (e.g. a label is removed). Deletion of the Projection cleans up every owned destination across all namespaces.
 
 Note: the destination `Kind` is always the same as the source `Kind` — there is no transformation.
 
@@ -47,10 +52,15 @@ The standard `metav1.Condition` array. The controller maintains three condition 
 | Type                 | True reason(s)       | False reason(s)                                                                                                   | Unknown reason(s)       |
 | -------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------- |
 | `SourceResolved`     | `Resolved`           | `SourceResolutionFailed`, `SourceFetchFailed`                                                                     | —                       |
-| `DestinationWritten` | `Projected`          | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`             | `SourceNotResolved`     |
+| `DestinationWritten` | `Projected`          | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`, `NamespaceResolutionFailed`, `DestinationWriteFailed`, `InvalidSpec` | `SourceNotResolved`     |
 | `Ready`              | `Projected`          | Mirrors whichever of `SourceResolved` or `DestinationWritten` failed, with the same reason and message            | —                       |
 
 `DestinationWritten=Unknown reason=SourceNotResolved` specifically means the source-side step failed, so a destination write was never attempted.
+
+For selector-based Projections, `DestinationWritten` is a rollup across all matched namespaces. If every matched namespace succeeds, the condition is `True`. If any fail, it's `False` with a reason from the failure set (or the generic `DestinationWriteFailed` when reasons differ across namespaces); the message lists the failed namespaces. Per-namespace detail is surfaced via Events.
+
+`DestinationWritten=False reason=InvalidSpec` means both `namespace` and `namespaceSelector` were set — fix the spec.
+`DestinationWritten=False reason=NamespaceResolutionFailed` means the label selector was malformed.
 
 ## Printer columns
 
@@ -113,3 +123,29 @@ status:
       message: ""
       lastTransitionTime: "2026-04-13T10:00:00Z"
 ```
+
+## Fan-out example (one source → many destinations)
+
+```yaml
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: shared-config-fanout
+  namespace: platform
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: shared-config
+    namespace: platform
+  destination:
+    # namespace is omitted — namespaceSelector picks the destinations
+    namespaceSelector:
+      matchLabels:
+        projection.be0x74a.io/mirror: "true"
+  overlay:
+    labels:
+      projected-by: projection
+```
+
+Every namespace carrying the label `projection.be0x74a.io/mirror=true` gets a copy. Adding or removing the label on a namespace triggers a reconcile (via the controller's namespace watch) and the destination set adjusts automatically.

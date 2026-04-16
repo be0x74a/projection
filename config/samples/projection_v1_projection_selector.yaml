@@ -1,0 +1,17 @@
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  labels:
+    app.kubernetes.io/name: projection
+    app.kubernetes.io/managed-by: kustomize
+  name: projection-selector-sample
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: shared-config
+    namespace: config-source
+  destination:
+    namespaceSelector:
+      matchLabels:
+        projection.be0x74a.io/mirror: "true"

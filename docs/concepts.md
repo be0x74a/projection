@@ -19,7 +19,9 @@ All four fields are required and pattern-validated at admission time — typos f
 
 ## 2. Destination
 
-The destination says where to write the copy:
+The destination says where to write the copy. There are two shapes:
+
+**Single destination** — one target namespace:
 
 ```yaml
 spec:
@@ -28,7 +30,26 @@ spec:
     name: shared-config     # optional; defaults to source.name
 ```
 
-Both fields are optional. The defaults mean the simplest `Projection` only needs a `source` block — and will mirror into the Projection's own namespace under the source's name.
+**Fan-out** — every namespace matching a label selector gets a copy:
+
+```yaml
+spec:
+  destination:
+    namespaceSelector:
+      matchLabels:
+        projection.be0x74a.io/mirror: "true"
+    name: shared-config     # optional; same name used in every matching namespace
+```
+
+`namespace` and `namespaceSelector` are mutually exclusive — pick one. All fields are optional: the simplest `Projection` only needs a `source` block and mirrors into its own namespace under the source's name.
+
+Fan-out behavior at a glance:
+
+- Each matching namespace gets a destination, independently created/updated.
+- If a namespace later stops matching (label removed), its destination is deleted.
+- Creating a new namespace with the matching label triggers a reconcile and the destination appears.
+- A conflict in one namespace (stranger object at the destination) doesn't block the others; `DestinationWritten` is a rollup condition with per-namespace detail surfaced via Events.
+- On Projection deletion, all owned destinations are cleaned up across every namespace.
 
 The destination `Kind` is always the same as the source `Kind` — `projection` does not transform Kinds.
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +61,12 @@ const (
 	// a source-object event can be mapped to all Projections pointing at it
 	// via a single cached List(MatchingFields).
 	sourceIndex = "spec.sourceKey"
+
+	// selectorIndex is a synthetic field-indexer key for Projections that use
+	// a namespaceSelector. It lets mapNamespace efficiently find only
+	// selector-based Projections instead of listing all Projections.
+	selectorIndex      = "spec.hasNamespaceSelector"
+	selectorIndexValue = "true"
 )
 
 // SourceMode controls which source objects the operator is willing to
@@ -157,6 +164,14 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Mutual exclusion: namespace and namespaceSelector can't both be set.
+	// Enforced here rather than via CEL because older apiserver CEL versions
+	// (k8s 1.31-) fail to resolve self.namespace for optional string fields.
+	if proj.Spec.Destination.Namespace != "" && proj.Spec.Destination.NamespaceSelector != nil {
+		return r.failDestination(ctx, proj, "InvalidSpec",
+			"destination.namespace and destination.namespaceSelector are mutually exclusive")
+	}
+
 	gvr, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		return r.failSource(ctx, proj, "SourceResolutionFailed", err.Error())
@@ -192,48 +207,105 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.failSource(ctx, proj, reason, msg)
 	}
 
-	dst := buildDestination(source, proj)
+	// Resolve destination namespace(s).
+	destNamespaces, err := r.resolveDestinationNamespaces(ctx, proj)
+	if err != nil {
+		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", err.Error())
+	}
 
-	existing := &unstructured.Unstructured{}
-	existing.SetGroupVersionKind(source.GroupVersionKind())
-	key := client.ObjectKey{Namespace: dst.GetNamespace(), Name: dst.GetName()}
-	switch err := r.Get(ctx, key, existing); {
-	case apierrors.IsNotFound(err):
-		if err := r.Create(ctx, dst); err != nil {
-			return r.failDestination(ctx, proj, "DestinationCreateFailed", err.Error())
+	type nsFailure struct {
+		namespace string
+		reason    string
+		message   string
+	}
+	var failures []nsFailure
+	successSet := map[string]bool{}
+
+	for _, targetNS := range destNamespaces {
+		dst := buildDestination(source, proj, targetNS)
+
+		existing := &unstructured.Unstructured{}
+		existing.SetGroupVersionKind(source.GroupVersionKind())
+		key := client.ObjectKey{Namespace: dst.GetNamespace(), Name: dst.GetName()}
+		switch fetchErr := r.Get(ctx, key, existing); {
+		case apierrors.IsNotFound(fetchErr):
+			if createErr := r.Create(ctx, dst); createErr != nil {
+				r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed",
+					fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
+				failures = append(failures, nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()})
+				continue
+			}
+			r.emit(proj, corev1.EventTypeNormal, "Projected",
+				fmt.Sprintf("projected %s %s/%s to %s/%s",
+					source.GroupVersionKind().String(),
+					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
+					dst.GetNamespace(), dst.GetName()))
+		case fetchErr != nil:
+			r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed",
+				fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
+			failures = append(failures, nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()})
+			continue
+		default:
+			if !isOwnedBy(existing, proj) {
+				msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
+					key.Namespace, key.Name)
+				r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", msg)
+				failures = append(failures, nsFailure{targetNS, "DestinationConflict", msg})
+				continue
+			}
+			// Carry over fields the apiserver allocated on create (clusterIP,
+			// volumeName, ...) — if we sent dst as-is, an Update of e.g. a Service
+			// would be rejected for trying to clear an immutable field.
+			preserveAPIServerAllocatedFields(existing, dst)
+			if !needsUpdate(existing, dst) {
+				// Destination already matches desired state. Skip the Update so
+				// we don't generate a noisy "Updated" event/metric on every
+				// reconcile of an unchanged Projection.
+				successSet[targetNS] = true
+				continue
+			}
+			dst.SetResourceVersion(existing.GetResourceVersion())
+			if updateErr := r.Update(ctx, dst); updateErr != nil {
+				r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed",
+					fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
+				failures = append(failures, nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()})
+				continue
+			}
+			r.emit(proj, corev1.EventTypeNormal, "Updated",
+				fmt.Sprintf("updated %s %s/%s to %s/%s",
+					source.GroupVersionKind().String(),
+					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
+					dst.GetNamespace(), dst.GetName()))
 		}
-		r.emit(proj, corev1.EventTypeNormal, "Projected",
-			fmt.Sprintf("projected %s %s/%s to %s/%s",
-				source.GroupVersionKind().String(),
-				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
-				dst.GetNamespace(), dst.GetName()))
-	case err != nil:
-		return r.failDestination(ctx, proj, "DestinationFetchFailed", err.Error())
-	default:
-		if !isOwnedBy(existing, proj) {
-			msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
-				key.Namespace, key.Name)
-			return r.failDestination(ctx, proj, "DestinationConflict", msg)
+		successSet[targetNS] = true
+	}
+
+	// Clean up stale destinations that are no longer in the resolved set.
+	if err := r.cleanupStaleDestinations(ctx, proj, gvr, successSet); err != nil {
+		logger.Error(err, "cleaning up stale destinations")
+		// Non-fatal: log but don't block the reconcile.
+	}
+
+	if len(failures) > 0 {
+		// Pick the most specific failure reason. If all failures share the
+		// same reason (e.g. DestinationConflict), use that; otherwise use a
+		// generic rollup reason.
+		reason := failures[0].reason
+		for _, f := range failures[1:] {
+			if f.reason != reason {
+				reason = "DestinationWriteFailed"
+				break
+			}
 		}
-		// Carry over fields the apiserver allocated on create (clusterIP,
-		// volumeName, ...) — if we sent dst as-is, an Update of e.g. a Service
-		// would be rejected for trying to clear an immutable field.
-		preserveAPIServerAllocatedFields(existing, dst)
-		if !needsUpdate(existing, dst) {
-			// Destination already matches desired state. Skip the Update so
-			// we don't generate a noisy "Updated" event/metric on every
-			// reconcile of an unchanged Projection.
-			break
+		var nsList []string
+		for _, f := range failures {
+			nsList = append(nsList, f.namespace)
 		}
-		dst.SetResourceVersion(existing.GetResourceVersion())
-		if err := r.Update(ctx, dst); err != nil {
-			return r.failDestination(ctx, proj, "DestinationUpdateFailed", err.Error())
+		msg := failures[0].message
+		if len(failures) > 1 {
+			msg = fmt.Sprintf("failed namespaces: %s", strings.Join(nsList, ", "))
 		}
-		r.emit(proj, corev1.EventTypeNormal, "Updated",
-			fmt.Sprintf("updated %s %s/%s to %s/%s",
-				source.GroupVersionKind().String(),
-				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
-				dst.GetNamespace(), dst.GetName()))
+		return r.failDestination(ctx, proj, reason, msg)
 	}
 
 	if err := r.markAllReady(ctx, proj); err != nil {
@@ -326,7 +398,20 @@ func (r *ProjectionReconciler) deleteDestination(ctx context.Context, proj *proj
 		// Proceed with finalizer removal rather than blocking forever.
 		return nil
 	}
+
+	// For selector-based Projections (or any Projection that may have previously
+	// used a selector), scan all namespaces for owned destinations.
+	if proj.Spec.Destination.NamespaceSelector != nil {
+		return r.deleteAllOwnedDestinations(ctx, proj, gvr)
+	}
+
+	// Single-namespace path.
 	ns, name := destinationCoords(proj)
+	return r.deleteOneDestination(ctx, proj, gvr, ns, name)
+}
+
+// deleteOneDestination removes a single destination if it's owned by this Projection.
+func (r *ProjectionReconciler) deleteOneDestination(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, ns, name string) error {
 	existing, err := r.DynamicClient.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -349,6 +434,126 @@ func (r *ProjectionReconciler) deleteDestination(ctx context.Context, proj *proj
 	r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted",
 		fmt.Sprintf("%s/%s", ns, name))
 	return nil
+}
+
+// deleteAllOwnedDestinations scans all namespaces for destinations owned by
+// this Projection and deletes them. Used by the finalizer path for
+// selector-based Projections. O(namespaces) — runs once during deletion;
+// a full scan is necessary because the selector may have changed since
+// the last reconcile.
+func (r *ProjectionReconciler) deleteAllOwnedDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource) error {
+	ownerValue := proj.Namespace + "/" + proj.Name
+	destName := proj.Spec.Destination.Name
+	if destName == "" {
+		destName = proj.Spec.Source.Name
+	}
+
+	// List all namespaces and check each for an owned destination.
+	var nsList corev1.NamespaceList
+	if err := r.List(ctx, &nsList); err != nil {
+		return fmt.Errorf("listing namespaces for cleanup: %w", err)
+	}
+	var firstErr error
+	for i := range nsList.Items {
+		ns := nsList.Items[i].Name
+		existing, err := r.DynamicClient.Resource(gvr).Namespace(ns).Get(ctx, destName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if existing.GetAnnotations()[ownedByAnnotation] != ownerValue {
+			continue
+		}
+		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, destName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted",
+			fmt.Sprintf("%s/%s", ns, destName))
+	}
+	return firstErr
+}
+
+// resolveDestinationNamespaces returns the list of namespace names the
+// destination should be written to. For single-namespace Projections this
+// returns a single entry; for selector-based Projections it lists all
+// namespaces matching the label selector.
+func (r *ProjectionReconciler) resolveDestinationNamespaces(ctx context.Context, proj *projectionv1.Projection) ([]string, error) {
+	if proj.Spec.Destination.NamespaceSelector == nil {
+		ns, _ := destinationCoords(proj)
+		return []string{ns}, nil
+	}
+	sel, err := metav1.LabelSelectorAsSelector(proj.Spec.Destination.NamespaceSelector)
+	if err != nil {
+		return nil, fmt.Errorf("parsing namespaceSelector: %w", err)
+	}
+	var nsList corev1.NamespaceList
+	if err := r.List(ctx, &nsList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
+		return nil, fmt.Errorf("listing namespaces: %w", err)
+	}
+	result := make([]string, 0, len(nsList.Items))
+	for i := range nsList.Items {
+		result = append(result, nsList.Items[i].Name)
+	}
+	return result, nil
+}
+
+// cleanupStaleDestinations removes destinations in namespaces that are owned
+// by this Projection but are no longer in the current resolved set. This
+// handles the case where a namespace loses a label or the selector changes.
+// O(namespaces) per call — acceptable because namespace counts are typically
+// low and this only runs for selector-based Projections.
+func (r *ProjectionReconciler) cleanupStaleDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, currentSet map[string]bool) error {
+	// Only needed for selector-based Projections.
+	if proj.Spec.Destination.NamespaceSelector == nil {
+		return nil
+	}
+	ownerValue := proj.Namespace + "/" + proj.Name
+	destName := proj.Spec.Destination.Name
+	if destName == "" {
+		destName = proj.Spec.Source.Name
+	}
+
+	var nsList corev1.NamespaceList
+	if err := r.List(ctx, &nsList); err != nil {
+		return fmt.Errorf("listing namespaces for stale cleanup: %w", err)
+	}
+	var firstErr error
+	for i := range nsList.Items {
+		ns := nsList.Items[i].Name
+		if currentSet[ns] {
+			continue // still in the resolved set, keep it
+		}
+		existing, err := r.DynamicClient.Resource(gvr).Namespace(ns).Get(ctx, destName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if existing.GetAnnotations()[ownedByAnnotation] != ownerValue {
+			continue
+		}
+		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, destName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		r.emit(proj, corev1.EventTypeNormal, "StaleDestinationDeleted",
+			fmt.Sprintf("%s/%s", ns, destName))
+	}
+	return firstErr
 }
 
 func destinationCoords(proj *projectionv1.Projection) (namespace, name string) {
@@ -552,13 +757,13 @@ var droppedSpecFieldsByGVK = map[schema.GroupVersionKind][][]string{
 	},
 }
 
-// buildDestination builds the object to write to the destination namespace.
+// buildDestination builds the object to write to the given target namespace.
 // It preserves the source's spec/data and user-set labels/annotations, drops
 // server-owned and cross-namespace-unsafe metadata, and applies the overlay
 // on top. The ownership annotation is required: subsequent reconciles use it
 // to distinguish our destination from a stranger's and refuse to overwrite
 // the latter.
-func buildDestination(source *unstructured.Unstructured, proj *projectionv1.Projection) *unstructured.Unstructured {
+func buildDestination(source *unstructured.Unstructured, proj *projectionv1.Projection, targetNamespace string) *unstructured.Unstructured {
 	dst := source.DeepCopy()
 
 	if metadata, ok := dst.Object["metadata"].(map[string]interface{}); ok {
@@ -585,21 +790,44 @@ func buildDestination(source *unstructured.Unstructured, proj *projectionv1.Proj
 	dst.SetAnnotations(annotations)
 
 	if len(proj.Spec.Overlay.Labels) > 0 {
-		labels := dst.GetLabels()
-		if labels == nil {
-			labels = map[string]string{}
+		lbls := dst.GetLabels()
+		if lbls == nil {
+			lbls = map[string]string{}
 		}
 		for k, v := range proj.Spec.Overlay.Labels {
-			labels[k] = v
+			lbls[k] = v
 		}
-		dst.SetLabels(labels)
+		dst.SetLabels(lbls)
 	}
 
-	ns, name := destinationCoords(proj)
-	dst.SetNamespace(ns)
+	name := proj.Spec.Destination.Name
+	if name == "" {
+		name = proj.Spec.Source.Name
+	}
+	dst.SetNamespace(targetNamespace)
 	dst.SetName(name)
 
 	return dst
+}
+
+// mapNamespace maps a Namespace event to reconcile requests for all
+// Projections that use a namespaceSelector. When a namespace is
+// created/updated/deleted, the matching set for selector-based Projections
+// may have changed.
+func (r *ProjectionReconciler) mapNamespace(ctx context.Context, _ client.Object) []reconcile.Request {
+	var list projectionv1.ProjectionList
+	if err := r.List(ctx, &list, client.MatchingFields{selectorIndex: selectorIndexValue}); err != nil {
+		log.FromContext(ctx).Error(err, "listing selector-based projections for namespace event")
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		p := &list.Items[i]
+		reqs = append(reqs, reconcile.Request{
+			NamespacedName: client.ObjectKey{Namespace: p.Namespace, Name: p.Name},
+		})
+	}
+	return reqs
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -612,6 +840,8 @@ func buildDestination(source *unstructured.Unstructured, proj *projectionv1.Proj
 //  2. We use .Build(r) (not .Complete(r)) to capture the controller.Controller
 //     so Reconcile can lazily register new source watches as previously-unseen
 //     GVKs appear. No up-front source watches — Reconcile adds them on demand.
+//  3. A Namespace watch triggers re-reconciliation of selector-based Projections
+//     whenever the set of namespaces changes.
 func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, sourceIndex,
 		func(obj client.Object) []string {
@@ -629,8 +859,23 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return fmt.Errorf("registering source field indexer: %w", err)
 	}
 
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, selectorIndex,
+		func(obj client.Object) []string {
+			p, ok := obj.(*projectionv1.Projection)
+			if !ok {
+				return nil
+			}
+			if p.Spec.Destination.NamespaceSelector != nil {
+				return []string{selectorIndexValue}
+			}
+			return nil
+		}); err != nil {
+		return fmt.Errorf("registering selector field indexer: %w", err)
+	}
+
 	c, err := builder.ControllerManagedBy(mgr).
 		For(&projectionv1.Projection{}).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.mapNamespace)).
 		Build(r)
 	if err != nil {
 		return err

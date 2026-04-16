@@ -445,7 +445,8 @@ func TestBuildDestination(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			dst := buildDestination(tc.source(), tc.proj)
+			targetNS, _ := destinationCoords(tc.proj)
+			dst := buildDestination(tc.source(), tc.proj, targetNS)
 			if dst == nil {
 				t.Fatal("buildDestination returned nil")
 			}
