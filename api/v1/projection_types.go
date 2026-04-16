@@ -47,7 +47,7 @@ type SourceRef struct {
 }
 
 // DestinationRef identifies where the projected object should be written.
-// +kubebuilder:validation:XValidation:rule="!(has(self.namespace) && size(self.namespace) > 0 && has(self.namespaceSelector))",message="namespace and namespaceSelector are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!(has(self.namespace) && has(self.namespaceSelector))",message="namespace and namespaceSelector are mutually exclusive"
 type DestinationRef struct {
 	// Namespace to project into. Defaults to the Projection's own namespace.
 	// Mutually exclusive with NamespaceSelector.
