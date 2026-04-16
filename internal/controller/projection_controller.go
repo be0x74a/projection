@@ -164,6 +164,14 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Mutual exclusion: namespace and namespaceSelector can't both be set.
+	// Enforced here rather than via CEL because older apiserver CEL versions
+	// (k8s 1.31-) fail to resolve self.namespace for optional string fields.
+	if proj.Spec.Destination.Namespace != "" && proj.Spec.Destination.NamespaceSelector != nil {
+		return r.failDestination(ctx, proj, "InvalidSpec",
+			"destination.namespace and destination.namespaceSelector are mutually exclusive")
+	}
+
 	gvr, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		return r.failSource(ctx, proj, "SourceResolutionFailed", err.Error())

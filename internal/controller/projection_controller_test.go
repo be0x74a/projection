@@ -1023,7 +1023,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 	})
 
 	Context("Namespace and namespaceSelector mutually exclusive", func() {
-		It("CEL validation rejects a Projection with both namespace and namespaceSelector set", func() {
+		It("reconciler rejects a Projection with both namespace and namespaceSelector set", func() {
 			ns := uniqueNS("sel-mutex")
 			ensureNamespace(ns)
 
@@ -1042,9 +1042,20 @@ var _ = Describe("Projection Controller (integration)", func() {
 					},
 				},
 			}
-			err := k8sClient.Create(ctx, proj)
-			Expect(err).To(HaveOccurred(), "should reject Projection with both namespace and namespaceSelector")
-			Expect(err.Error()).To(ContainSubstring("mutually exclusive"))
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			projKey := types.NamespacedName{Name: proj.Name, Namespace: proj.Namespace}
+			DeferCleanup(func() { deleteProjection(projKey) })
+
+			reconcileUntilSteady(r, projKey, 5)
+
+			var got projectionv1.Projection
+			Expect(k8sClient.Get(ctx, projKey, &got)).To(Succeed())
+			Expect(got.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", Equal(conditionDestinationWritten)),
+				HaveField("Status", Equal(metav1.ConditionFalse)),
+				HaveField("Reason", Equal("InvalidSpec")),
+				HaveField("Message", ContainSubstring("mutually exclusive")),
+			)))
 		})
 	})
 })
