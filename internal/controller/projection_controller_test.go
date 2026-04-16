@@ -576,7 +576,491 @@ var _ = Describe("Projection Controller (integration)", func() {
 			)))
 		})
 	})
+
+	Context("Namespace selector path", func() {
+		const (
+			sourceCMName = "shared-cfg"
+			projName     = "p-selector"
+		)
+		var (
+			sourceNS  string
+			matchNS1  string
+			matchNS2  string
+			matchNS3  string
+			noMatchNS string
+			projKey   types.NamespacedName
+		)
+
+		BeforeEach(func() {
+			sourceNS = uniqueNS("sel-src")
+			matchNS1 = uniqueNS("sel-match1")
+			matchNS2 = uniqueNS("sel-match2")
+			matchNS3 = uniqueNS("sel-match3")
+			noMatchNS = uniqueNS("sel-nomatch")
+			projKey = types.NamespacedName{Name: projName, Namespace: sourceNS}
+
+			ensureNamespace(sourceNS)
+			ensureNamespaceWithLabels(matchNS1, map[string]string{"mirror": "true"})
+			ensureNamespaceWithLabels(matchNS2, map[string]string{"mirror": "true"})
+			ensureNamespaceWithLabels(matchNS3, map[string]string{"mirror": "true"})
+			ensureNamespace(noMatchNS)
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        sourceCMName,
+					Namespace:   sourceNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"env": "production"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: sourceNS},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: sourceCMName, Namespace: sourceNS,
+					},
+					Destination: projectionv1.DestinationRef{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"mirror": "true"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			deleteProjection(projKey)
+		})
+
+		It("projects the source to all matching namespaces and none to non-matching", func() {
+			reconcileUntilSteady(r, projKey, 5)
+
+			for _, ns := range []string{matchNS1, matchNS2, matchNS3} {
+				dst := &corev1.ConfigMap{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: ns}, dst)).To(Succeed(),
+					"destination should exist in matching namespace %s", ns)
+				Expect(dst.Data).To(Equal(map[string]string{"env": "production"}))
+				Expect(dst.Annotations).To(HaveKeyWithValue(ownedByAnnotation, sourceNS+"/"+projName))
+			}
+
+			// Non-matching namespace should NOT have a destination.
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: noMatchNS}, &corev1.ConfigMap{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "destination should not exist in non-matching namespace")
+
+			// Status: Ready=True, DestinationWritten=True.
+			proj := &projectionv1.Projection{}
+			Expect(k8sClient.Get(ctx, projKey, proj)).To(Succeed())
+			Expect(proj.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", Equal(conditionReady)),
+				HaveField("Status", Equal(metav1.ConditionTrue)),
+			)))
+			Expect(proj.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", Equal(conditionDestinationWritten)),
+				HaveField("Status", Equal(metav1.ConditionTrue)),
+			)))
+		})
+	})
+
+	Context("Namespace selector — namespace added after initial reconcile", func() {
+		const (
+			sourceCMName = "cfg-late"
+			projName     = "p-sel-late"
+		)
+		var (
+			sourceNS string
+			matchNS1 string
+			matchNS2 string
+			projKey  types.NamespacedName
+		)
+
+		BeforeEach(func() {
+			sourceNS = uniqueNS("sellate-src")
+			matchNS1 = uniqueNS("sellate-m1")
+			matchNS2 = uniqueNS("sellate-m2")
+			projKey = types.NamespacedName{Name: projName, Namespace: sourceNS}
+
+			ensureNamespace(sourceNS)
+			ensureNamespaceWithLabels(matchNS1, map[string]string{"tier": "frontend"})
+			ensureNamespaceWithLabels(matchNS2, map[string]string{"tier": "frontend"})
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        sourceCMName,
+					Namespace:   sourceNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"mode": "live"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: sourceNS},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: sourceCMName, Namespace: sourceNS,
+					},
+					Destination: projectionv1.DestinationRef{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"tier": "frontend"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			deleteProjection(projKey)
+		})
+
+		It("picks up a newly-labeled namespace on re-reconcile", func() {
+			reconcileUntilSteady(r, projKey, 5)
+
+			// Verify initial 2 destinations.
+			for _, ns := range []string{matchNS1, matchNS2} {
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: ns}, &corev1.ConfigMap{})).To(Succeed())
+			}
+
+			// Add a 3rd matching namespace.
+			lateNS := uniqueNS("sellate-m3")
+			ensureNamespaceWithLabels(lateNS, map[string]string{"tier": "frontend"})
+
+			// Re-reconcile.
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: projKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// 3rd destination should now exist.
+			dst := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: lateNS}, dst)).To(Succeed())
+			Expect(dst.Data).To(Equal(map[string]string{"mode": "live"}))
+		})
+	})
+
+	Context("Namespace selector — stale destination cleanup", func() {
+		const (
+			sourceCMName = "cfg-stale"
+			projName     = "p-sel-stale"
+		)
+		var (
+			sourceNS string
+			matchNS1 string
+			matchNS2 string
+			matchNS3 string
+			projKey  types.NamespacedName
+		)
+
+		BeforeEach(func() {
+			sourceNS = uniqueNS("selstale-src")
+			matchNS1 = uniqueNS("selstale-m1")
+			matchNS2 = uniqueNS("selstale-m2")
+			matchNS3 = uniqueNS("selstale-m3")
+			projKey = types.NamespacedName{Name: projName, Namespace: sourceNS}
+
+			ensureNamespace(sourceNS)
+			ensureNamespaceWithLabels(matchNS1, map[string]string{"zone": "us"})
+			ensureNamespaceWithLabels(matchNS2, map[string]string{"zone": "us"})
+			ensureNamespaceWithLabels(matchNS3, map[string]string{"zone": "us"})
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        sourceCMName,
+					Namespace:   sourceNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"region": "east"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: sourceNS},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: sourceCMName, Namespace: sourceNS,
+					},
+					Destination: projectionv1.DestinationRef{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"zone": "us"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			deleteProjection(projKey)
+		})
+
+		It("deletes the destination in a de-labeled namespace on re-reconcile", func() {
+			reconcileUntilSteady(r, projKey, 5)
+
+			// All 3 destinations exist.
+			for _, ns := range []string{matchNS1, matchNS2, matchNS3} {
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: ns}, &corev1.ConfigMap{})).To(Succeed())
+			}
+
+			// Remove the label from matchNS3.
+			ns3 := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: matchNS3}, ns3)).To(Succeed())
+			delete(ns3.Labels, "zone")
+			Expect(k8sClient.Update(ctx, ns3)).To(Succeed())
+
+			// Re-reconcile.
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: projKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// matchNS1 and matchNS2 still have destinations.
+			for _, ns := range []string{matchNS1, matchNS2} {
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: ns}, &corev1.ConfigMap{})).To(Succeed(),
+					"destination should still exist in %s", ns)
+			}
+
+			// matchNS3's destination was cleaned up.
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: matchNS3}, &corev1.ConfigMap{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+				"stale destination should be removed from de-labeled namespace")
+		})
+	})
+
+	Context("Namespace selector — deletion cleans all destinations", func() {
+		const (
+			sourceCMName = "cfg-delall"
+			projName     = "p-sel-delall"
+		)
+		var (
+			sourceNS string
+			matchNS1 string
+			matchNS2 string
+			matchNS3 string
+			projKey  types.NamespacedName
+		)
+
+		BeforeEach(func() {
+			sourceNS = uniqueNS("seldelall-src")
+			matchNS1 = uniqueNS("seldelall-m1")
+			matchNS2 = uniqueNS("seldelall-m2")
+			matchNS3 = uniqueNS("seldelall-m3")
+			projKey = types.NamespacedName{Name: projName, Namespace: sourceNS}
+
+			ensureNamespace(sourceNS)
+			ensureNamespaceWithLabels(matchNS1, map[string]string{"cleanup": "yes"})
+			ensureNamespaceWithLabels(matchNS2, map[string]string{"cleanup": "yes"})
+			ensureNamespaceWithLabels(matchNS3, map[string]string{"cleanup": "yes"})
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        sourceCMName,
+					Namespace:   sourceNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"final": "data"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: sourceNS},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: sourceCMName, Namespace: sourceNS,
+					},
+					Destination: projectionv1.DestinationRef{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"cleanup": "yes"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			deleteProjection(projKey)
+		})
+
+		It("removes all destinations when the Projection is deleted", func() {
+			reconcileUntilSteady(r, projKey, 5)
+
+			// All 3 destinations exist.
+			for _, ns := range []string{matchNS1, matchNS2, matchNS3} {
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: ns}, &corev1.ConfigMap{})).To(Succeed())
+			}
+
+			// Delete the Projection.
+			live := &projectionv1.Projection{}
+			Expect(k8sClient.Get(ctx, projKey, live)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, live)).To(Succeed())
+
+			// Deletion path reconcile.
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: projKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// All destinations gone.
+			for _, ns := range []string{matchNS1, matchNS2, matchNS3} {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: ns}, &corev1.ConfigMap{})
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+					"destination in %s should be deleted", ns)
+			}
+
+			// Projection gone (finalizer removed, GC'd).
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, projKey, &projectionv1.Projection{})
+				return apierrors.IsNotFound(err)
+			}).Should(BeTrue())
+		})
+	})
+
+	Context("Namespace selector — partial failure (conflict in one namespace)", func() {
+		const (
+			sourceCMName = "cfg-partial"
+			projName     = "p-sel-partial"
+		)
+		var (
+			sourceNS   string
+			okNS1      string
+			okNS2      string
+			conflictNS string
+			projKey    types.NamespacedName
+		)
+
+		BeforeEach(func() {
+			sourceNS = uniqueNS("selpartial-src")
+			okNS1 = uniqueNS("selpartial-ok1")
+			okNS2 = uniqueNS("selpartial-ok2")
+			conflictNS = uniqueNS("selpartial-conflict")
+			projKey = types.NamespacedName{Name: projName, Namespace: sourceNS}
+
+			ensureNamespace(sourceNS)
+			ensureNamespaceWithLabels(okNS1, map[string]string{"partial": "yes"})
+			ensureNamespaceWithLabels(okNS2, map[string]string{"partial": "yes"})
+			ensureNamespaceWithLabels(conflictNS, map[string]string{"partial": "yes"})
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        sourceCMName,
+					Namespace:   sourceNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"partial": "test"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			// Pre-create an unowned stranger in the conflict namespace.
+			stranger := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      sourceCMName,
+					Namespace: conflictNS,
+					Annotations: map[string]string{
+						"some-other-owner": "yes",
+					},
+				},
+				Data: map[string]string{"from": "stranger"},
+			}
+			Expect(k8sClient.Create(ctx, stranger)).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: sourceNS},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: sourceCMName, Namespace: sourceNS,
+					},
+					Destination: projectionv1.DestinationRef{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"partial": "yes"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			deleteProjection(projKey)
+		})
+
+		It("succeeds in non-conflicting namespaces but reports Ready=False due to the conflict", func() {
+			reconcileUntilSteady(r, projKey, 5)
+
+			// The two OK namespaces should have owned destinations.
+			for _, ns := range []string{okNS1, okNS2} {
+				dst := &corev1.ConfigMap{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: ns}, dst)).To(Succeed(),
+					"destination should exist in %s", ns)
+				Expect(dst.Data).To(Equal(map[string]string{"partial": "test"}))
+				Expect(dst.Annotations).To(HaveKeyWithValue(ownedByAnnotation, sourceNS+"/"+projName))
+			}
+
+			// Stranger in the conflict namespace is untouched.
+			stranger := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: conflictNS}, stranger)).To(Succeed())
+			Expect(stranger.Data).To(Equal(map[string]string{"from": "stranger"}))
+			Expect(stranger.Annotations).NotTo(HaveKey(ownedByAnnotation))
+
+			// Status: Ready=False, DestinationWritten=False with DestinationConflict.
+			proj := &projectionv1.Projection{}
+			Expect(k8sClient.Get(ctx, projKey, proj)).To(Succeed())
+			Expect(proj.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", Equal(conditionReady)),
+				HaveField("Status", Equal(metav1.ConditionFalse)),
+			)))
+			Expect(proj.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", Equal(conditionDestinationWritten)),
+				HaveField("Status", Equal(metav1.ConditionFalse)),
+				HaveField("Reason", Equal("DestinationConflict")),
+			)))
+
+			// Warning event emitted for the conflict.
+			events := drainEvents(r)
+			Expect(events).To(ContainElement(ContainSubstring("Warning DestinationConflict")))
+		})
+	})
+
+	Context("Namespace and namespaceSelector mutually exclusive", func() {
+		It("CEL validation rejects a Projection with both namespace and namespaceSelector set", func() {
+			ns := uniqueNS("sel-mutex")
+			ensureNamespace(ns)
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: "p-mutex", Namespace: ns},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: "some-cm", Namespace: ns,
+					},
+					Destination: projectionv1.DestinationRef{
+						Namespace: "explicit-ns",
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"mirror": "true"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, proj)
+			Expect(err).To(HaveOccurred(), "should reject Projection with both namespace and namespaceSelector")
+			Expect(err.Error()).To(ContainSubstring("mutually exclusive"))
+		})
+	})
 })
+
+func ensureNamespaceWithLabels(name string, labels map[string]string) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+	}
+	err := k8sClient.Create(ctx, ns)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
+	}
+}
 
 // Silence unused-import warnings when the file is edited in isolation.
 var _ = client.Object(&corev1.ConfigMap{})

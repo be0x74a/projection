@@ -47,12 +47,18 @@ type SourceRef struct {
 }
 
 // DestinationRef identifies where the projected object should be written.
+// +kubebuilder:validation:XValidation:rule="!(has(self.namespace) && size(self.namespace) > 0 && has(self.namespaceSelector))",message="namespace and namespaceSelector are mutually exclusive"
 type DestinationRef struct {
 	// Namespace to project into. Defaults to the Projection's own namespace.
+	// Mutually exclusive with NamespaceSelector.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Namespace string `json:"namespace,omitempty"`
+	// NamespaceSelector selects namespaces to project into by label.
+	// Mutually exclusive with Namespace.
+	// +optional
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 	// Name in the destination namespace. Defaults to Source.Name.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63

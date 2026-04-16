@@ -90,7 +90,8 @@ func FuzzBuildDestination(f *testing.F) {
 			proj.Spec.Overlay.Annotations = map[string]string{overlayKey: overlayValue}
 		}
 
-		dst := buildDestination(src, proj)
+		targetNS, _ := destinationCoords(proj)
+		dst := buildDestination(src, proj, targetNS)
 
 		if dst == nil {
 			t.Fatalf("buildDestination returned nil for src=%s/%s proj=%s/%s",
