@@ -25,7 +25,7 @@ The standard `metav1.Condition` array. The controller maintains three condition 
 
 | Type                 | True reason(s)       | False reason(s)                                                                                                   | Unknown reason(s)       |
 | -------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `SourceResolved`     | `Resolved`           | `SourceResolutionFailed`, `SourceFetchFailed`                                                                     | —                       |
+| `SourceResolved`     | `Resolved`           | `SourceResolutionFailed` (RESTMapper can't find Kind), `SourceFetchFailed` (transient fetch error), `SourceDeleted` (source 404 — owned destinations cleaned up) | —                       |
 | `DestinationWritten` | `Projected`          | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`, `NamespaceResolutionFailed`, `DestinationWriteFailed`, `InvalidSpec` | `SourceNotResolved`     |
 | `Ready`              | `Projected`          | Mirrors whichever of `SourceResolved` or `DestinationWritten` failed, with the same reason and message            | —                       |
 
