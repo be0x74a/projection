@@ -392,6 +392,78 @@ func TestBuildDestination(t *testing.T) {
 			},
 		},
 		{
+			name: "strips apiserver-allocated Job spec fields",
+			source: func() *unstructured.Unstructured {
+				u := &unstructured.Unstructured{}
+				u.SetAPIVersion("batch/v1")
+				u.SetKind("Job")
+				u.SetName("src-job")
+				u.SetNamespace("src-ns")
+				u.Object["spec"] = map[string]interface{}{
+					"selector": map[string]interface{}{
+						"matchLabels": map[string]interface{}{
+							"batch.kubernetes.io/controller-uid": "abcd-1234",
+						},
+					},
+					"template": map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"labels": map[string]interface{}{
+								"controller-uid":                     "abcd-1234",
+								"batch.kubernetes.io/controller-uid": "abcd-1234",
+								"batch.kubernetes.io/job-name":       "src-job",
+								"user-label":                         "keep-me",
+							},
+						},
+						"spec": map[string]interface{}{
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name":  "main",
+									"image": "busybox",
+								},
+							},
+							"restartPolicy": "Never",
+						},
+					},
+					"backoffLimit": int64(4),
+				}
+				return u
+			},
+			proj: newProj("proj-ns", "proj-name",
+				projectionv1.SourceRef{APIVersion: "batch/v1", Kind: "Job", Name: "src-job", Namespace: "src-ns"},
+				projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
+				// spec.selector must be stripped so the destination apiserver regenerates it.
+				if _, found, _ := unstructured.NestedFieldNoCopy(dst.Object, "spec", "selector"); found {
+					t.Error("expected spec.selector to be stripped for Job")
+				}
+				// Auto-generated labels on the pod template must be stripped.
+				for _, key := range []string{
+					"controller-uid",
+					"batch.kubernetes.io/controller-uid",
+					"batch.kubernetes.io/job-name",
+				} {
+					if _, found, _ := unstructured.NestedFieldNoCopy(dst.Object, "spec", "template", "metadata", "labels", key); found {
+						t.Errorf("expected spec.template.metadata.labels[%q] to be stripped for Job", key)
+					}
+				}
+				// User-set template labels must survive.
+				userLabel, found, _ := unstructured.NestedString(dst.Object, "spec", "template", "metadata", "labels", "user-label")
+				if !found {
+					t.Error("spec.template.metadata.labels[user-label] was stripped, should have survived")
+				}
+				if userLabel != "keep-me" {
+					t.Errorf("user-label = %q, want %q", userLabel, "keep-me")
+				}
+				// User-set spec fields must survive.
+				if _, found, _ := unstructured.NestedFieldNoCopy(dst.Object, "spec", "backoffLimit"); !found {
+					t.Error("spec.backoffLimit was stripped, should have survived")
+				}
+				if _, found, _ := unstructured.NestedFieldNoCopy(dst.Object, "spec", "template", "spec", "containers"); !found {
+					t.Error("spec.template.spec.containers was stripped, should have survived")
+				}
+			},
+		},
+		{
 			name: "leaves non-listed Kinds untouched",
 			source: func() *unstructured.Unstructured {
 				u := &unstructured.Unstructured{}

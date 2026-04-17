@@ -127,7 +127,7 @@ See [docs/concepts.md](docs/concepts.md) for the full picture, [docs/observabili
 
 - **Single destination per `Projection`.** Multi-destination fan-out via label selector is on the roadmap; for now declare one `Projection` per destination namespace.
 - **Same-cluster only.** Cross-cluster mirroring is a non-goal for v0.
-- **A few Kinds need extra care.** `Service`, `PersistentVolumeClaim`, and `Pod` have apiserver-allocated spec fields handled out of the box. Other Kinds with similar fields (rare) may need an addition to `droppedSpecFieldsByGVK`.
+- **A few Kinds need extra care.** `Service`, `PersistentVolumeClaim`, `Pod`, and `Job` have apiserver-allocated spec fields handled out of the box. Other Kinds with similar fields (rare) may need an addition to `droppedSpecFieldsByGVK` — see [limitations](docs/limitations.md#some-kinds-need-extra-stripping-rules).
 - **Alpha.** API may change before v1.0.0. CRD storage version is `v1`; future versions will be served alongside with conversion.
 
 ## Documentation

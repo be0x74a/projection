@@ -18,15 +18,22 @@ If you need cross-cluster, look at [Admiralty](https://admiralty.io/), [Open Clu
 
 ### Some Kinds need extra stripping rules
 
-A few Kinds carry **apiserver-allocated spec fields** that must be stripped before mirroring (otherwise the create at the destination is rejected as trying to supply an immutable field). Supported today in `droppedSpecFieldsByGVK`:
+A few Kinds carry **apiserver-allocated spec fields** that must be stripped before mirroring (otherwise the create at the destination is rejected as trying to supply an immutable field). This list grows case-by-case as gaps are reported — see the [umbrella issue](https://github.com/be0x74a/projection/issues/32) for the triage queue. Supported today in `droppedSpecFieldsByGVK`:
 
-| Kind (core v1)          | Stripped fields                                               |
-| ----------------------- | ------------------------------------------------------------- |
-| `Service`               | `spec.clusterIP`, `spec.clusterIPs`, `spec.ipFamilies`, `spec.ipFamilyPolicy` |
-| `PersistentVolumeClaim` | `spec.volumeName`                                             |
-| `Pod`                   | `spec.nodeName`                                               |
+| Kind                        | Stripped fields                                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| `v1 Service`                | `spec.clusterIP`, `spec.clusterIPs`, `spec.ipFamilies`, `spec.ipFamilyPolicy`                    |
+| `v1 PersistentVolumeClaim`  | `spec.volumeName`                                                                                |
+| `v1 Pod`                    | `spec.nodeName`                                                                                  |
+| `batch/v1 Job`              | `spec.selector`, `spec.template.metadata.labels["controller-uid"]`, `spec.template.metadata.labels["batch.kubernetes.io/controller-uid"]`, `spec.template.metadata.labels["batch.kubernetes.io/job-name"]` |
+
+> **Job caveat**: Jobs created with `spec.manualSelector: true` carry a user-authored selector that *should* be mirrored. The strip is unconditional today, so these Jobs will not project correctly — file an issue if you hit this.
 
 If you hit an error like `spec.FIELD: field is immutable` when mirroring a Kind not on this list, you've found a gap — file an issue with the Kind and field, and we'll add an entry. The cost of a missing entry is a clean failure with an actionable error message; the cost of a wrong entry is silently dropping user data. The bar for adding entries is deliberately conservative.
+
+Some Kinds *look* like stripping candidates but aren't:
+- **`EndpointSlice` / `Endpoints`**: these are managed by the endpoints controller in the destination namespace, keyed on the Service selector there — a mirrored copy would either be overwritten or sit stale. Mirror the Service instead and let the destination endpoints controller rebuild addresses.
+- **CRDs with mutating-webhook-defaulted fields**: installation-specific, can't be captured by a static map. Configure the source to match the destination's defaults, or exclude those CRDs.
 
 ### Namespaced resources only
 

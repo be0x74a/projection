@@ -233,6 +233,7 @@ func FuzzPreserveAPIServerAllocatedFields(f *testing.F) {
 	f.Add("v1", "Service", "10.96.10.10", "svc", "ns")
 	f.Add("v1", "PersistentVolumeClaim", "pv-abc", "pvc", "ns")
 	f.Add("v1", "Pod", "node-1", "pod", "ns")
+	f.Add("batch/v1", "Job", "abcd-uid-1234", "job", "ns")
 	f.Add("v1", "ConfigMap", "ignored", "cm", "ns")
 
 	f.Fuzz(func(t *testing.T,

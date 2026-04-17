@@ -767,6 +767,12 @@ var droppedSpecFieldsByGVK = map[schema.GroupVersionKind][][]string{
 	{Group: "", Version: "v1", Kind: "Pod"}: {
 		{"spec", "nodeName"},
 	},
+	{Group: "batch", Version: "v1", Kind: "Job"}: {
+		{"spec", "template", "metadata", "labels", "batch.kubernetes.io/controller-uid"},
+		{"spec", "template", "metadata", "labels", "batch.kubernetes.io/job-name"},
+		{"spec", "template", "metadata", "labels", "controller-uid"},
+		{"spec", "selector"},
+	},
 }
 
 // buildDestination builds the object to write to the given target namespace.
