@@ -188,6 +188,7 @@ This is what keeps propagation under ~100 ms without periodic polling.
 
 ## Related
 
-- [CRD reference](crd-reference.md) — exact field types and validation.
+- [API reference](api-reference.md) — exact field types and validation, generated from `api/v1/projection_types.go`.
+- [CRD behavior and examples](crd-reference.md) — cross-field invariants, condition reasons, YAML examples.
 - [Observability](observability.md) — conditions, events, metrics.
 - [Security](security.md) — the RBAC trade-offs behind "any Kind".

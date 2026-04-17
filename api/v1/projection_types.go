@@ -73,8 +73,16 @@ type DestinationRef struct {
 // Overlay is applied on top of the source object's metadata before writing
 // to the destination. Overlay entries win on key conflicts with the source.
 type Overlay struct {
+	// Labels are merged with the source object's metadata.labels before
+	// writing to the destination. Keys set here win on conflict with
+	// source labels.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
+	// Annotations are merged with the source object's metadata.annotations
+	// before writing to the destination. Keys set here win on conflict
+	// with source annotations. Note: the controller always overwrites
+	// projection.be0x74a.io/owned-by to its own bookkeeping value;
+	// attempts to set it here are ignored.
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
 }

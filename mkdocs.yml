@@ -45,7 +45,8 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Concepts: concepts.md
-  - CRD reference: crd-reference.md
+  - CRD behavior: crd-reference.md
+  - API reference: api-reference.md
   - Use cases: use-cases.md
   - vs alternatives: comparison.md
   - Observability: observability.md

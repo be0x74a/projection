@@ -173,4 +173,5 @@ If the last event is recent and the destination still looks wrong, the controlle
 
 - [Concepts](concepts.md) — how source/destination/overlay/ownership fit together.
 - [Use cases](use-cases.md) — six worked examples.
-- [CRD reference](crd-reference.md) — field-by-field spec.
+- [API reference](api-reference.md) — field-by-field spec generated from `api/v1/projection_types.go`.
+- [CRD behavior and examples](crd-reference.md) — cross-field invariants, condition reasons, YAML examples.
