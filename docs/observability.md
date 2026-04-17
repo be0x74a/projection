@@ -166,6 +166,24 @@ Pass `--metrics-bind-address=0` at startup to disable the endpoint entirely. Pas
     summary: "projection reconcile success rate below 95% (15m)"
 ```
 
+## 4. Operational tuning
+
+Two CLI flags (and their Helm chart equivalents) control reconciliation and leader-election timing. Defaults are conservative cluster-scale values; tune only when you've observed a specific pain point.
+
+### `--requeue-interval` / `requeueInterval` (default: `30s`)
+
+How long the controller waits between reconciles of the same Projection. Tune when:
+
+- **Longer (e.g. `2m`)** if your cluster has hundreds of Projections that flap on a flaky upstream API and you're seeing apiserver load from repeated reconciles. The trade-off is slower recovery when a transient failure clears.
+- **Shorter (e.g. `5s`)** in dev clusters where you want fast feedback as you iterate on source objects. Don't go below the controller-runtime minimum (~1s) — the reconciler will busy-loop.
+
+### `--leader-election-lease-duration` / `leaderElection.leaseDuration` (default: `15s`)
+
+Only relevant when `replicaCount > 1`. How long the leader holds the lease before a standby may take over on crash.
+
+- **Longer (e.g. `30s`)** reduces lease-renewal traffic against the apiserver — useful on large fleets where many operators each renew their own leases.
+- **Shorter (e.g. `10s`)** speeds up failover at the cost of more apiserver churn. Must remain strictly greater than controller-runtime's 10s renew-deadline default — go below and leader election misbehaves.
+
 ## One-shot snapshot
 
 The repo ships [`hack/observe.sh`](https://github.com/be0x74a/projection/blob/main/hack/observe.sh) as a copy-paste debugging helper. It dumps:

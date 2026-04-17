@@ -58,8 +58,10 @@ spec:
             {{- end }}
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
+            - --leader-election-lease-duration={{ .Values.leaderElection.leaseDuration }}
             {{- end }}
             - --source-mode={{ .Values.sourceMode }}
+            - --requeue-interval={{ .Values.requeueInterval }}
           ports:
             {{- if .Values.metrics.enabled }}
             - name: metrics

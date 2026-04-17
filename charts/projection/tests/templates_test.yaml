@@ -1,8 +1,9 @@
-suite: ServiceMonitor / NetworkPolicy / PodDisruptionBudget opt-in
+suite: Chart template rendering
 templates:
   - servicemonitor.yaml
   - networkpolicy.yaml
   - poddisruptionbudget.yaml
+  - deployment.yaml
 
 tests:
   - it: renders no ServiceMonitor by default
@@ -72,3 +73,26 @@ tests:
           value: 1
       - notExists:
           path: spec.maxUnavailable
+
+  - it: passes --requeue-interval to the controller (default 30s)
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --requeue-interval=30s
+
+  - it: passes --leader-election-lease-duration by default (leader election enabled)
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --leader-election-lease-duration=15s
+
+  - it: omits --leader-election-lease-duration when leader election disabled
+    template: deployment.yaml
+    set:
+      leaderElection.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --leader-election-lease-duration=15s

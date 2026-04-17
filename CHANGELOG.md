@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Six new integration specs covering the fan-out path: happy path, late namespace addition, stale cleanup, deletion cleanup, partial failure, and mutual-exclusion CEL validation.
 - Kind-aware spec field stripping for `batch/v1 Job` (`spec.selector` plus the auto-generated `controller-uid` / `batch.kubernetes.io/controller-uid` / `batch.kubernetes.io/job-name` labels on `spec.template.metadata.labels`). Jobs created with `spec.manualSelector: true` are a known limitation. Part of the `droppedSpecFieldsByGVK` umbrella track (#32).
 - Helm chart: opt-in `ServiceMonitor`, `NetworkPolicy` (egress lockdown), and `PodDisruptionBudget` templates, each gated by `serviceMonitor.enabled` / `networkPolicy.enabled` / `podDisruptionBudget.enabled` in `values.yaml`. Chart-level `helm-unittest` tests and a `chart-test` CI job added (#33).
+- Two CLI flags for operational tuning: `--requeue-interval` (default `30s`, plumbed as chart value `requeueInterval`) controls reconciliation cadence, and `--leader-election-lease-duration` (default `15s`, plumbed as `leaderElection.leaseDuration`) controls leader-election failover timing. Defaults preserve pre-existing behavior — zero change for existing deployments. See `docs/observability.md#4-operational-tuning` for tuning guidance. (#34)
 
 ### Changed
 

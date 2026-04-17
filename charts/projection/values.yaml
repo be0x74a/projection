@@ -25,10 +25,21 @@ fullnameOverride: ""
 # so only one replica reconciles at a time.
 replicaCount: 1
 
+# -- Requeue cadence for Projection reconciliation. Controls how often the
+# controller retries after a successful or failed reconcile. Longer values
+# reduce API server load in clusters with many flapping projections; shorter
+# values speed up developer feedback. Plumbed as --requeue-interval.
+requeueInterval: 30s
+
 # -- Leader election settings. The leader lease is stored in the release namespace.
 leaderElection:
   # -- Enable Kubernetes leader election. Required when replicaCount > 1.
   enabled: true
+  # -- Duration the leader holds the lease before standbys may take over.
+  # Only effective when enabled=true. Must remain strictly greater than
+  # controller-runtime's 10s renew-deadline default. Plumbed as
+  # --leader-election-lease-duration.
+  leaseDuration: 15s
 
 # -- Metrics endpoint settings. The controller serves Prometheus metrics on
 # :8443 secured by the kube-rbac-authn/authz filter by default.
