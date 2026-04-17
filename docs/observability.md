@@ -59,38 +59,45 @@ kubectl -n <ns> wait --for=condition=Ready projection/<name> --timeout=60s
 
 ## 2. Kubernetes Events
 
-The controller emits Events on every state transition. They are the best way to see *history* — a status condition only shows the current state, but Events show what happened and when.
+The controller emits Events on every state transition. They are the best way to see *history* — a status condition only shows the current state, but Events show what happened and when. Events are written through the `events.k8s.io/v1` API and carry both a `reason` (categorical tag) and an `action` (the controller verb that produced the event).
 
-| Event reason             | Type    | Trigger                                                                           |
-| ------------------------ | ------- | --------------------------------------------------------------------------------- |
-| `Projected`              | Normal  | Destination was created.                                                          |
-| `Updated`                | Normal  | Destination existed and was updated to match source (after `needsUpdate` diff).   |
-| `DestinationDeleted`     | Normal  | Destination was deleted as part of `Projection` deletion.                         |
-| `DestinationLeftAlone`   | Normal  | `Projection` was deleted but destination no longer had the ownership annotation.  |
-| `DestinationConflict`    | Warning | Destination existed and was not owned by this `Projection`.                       |
-| `SourceFetchFailed`      | Warning | Dynamic client `Get` on the source returned an error.                             |
-| `SourceResolutionFailed` | Warning | RESTMapper couldn't resolve `apiVersion`/`kind`.                                  |
-| `DestinationCreateFailed`| Warning | Create on destination failed.                                                     |
-| `DestinationUpdateFailed`| Warning | Update on destination failed.                                                     |
-| `DestinationFetchFailed` | Warning | Get on an existing destination failed during reconcile.                           |
+| Event reason              | Type    | Action     | Trigger                                                                           |
+| ------------------------- | ------- | ---------- | --------------------------------------------------------------------------------- |
+| `Projected`               | Normal  | `Create`   | Destination was created.                                                          |
+| `Updated`                 | Normal  | `Update`   | Destination existed and was updated to match source (after `needsUpdate` diff).   |
+| `DestinationDeleted`      | Normal  | `Delete`   | Destination was deleted as part of `Projection` deletion or a stale-namespace cleanup. |
+| `DestinationLeftAlone`    | Normal  | `Delete`   | `Projection` was deleted but destination no longer had the ownership annotation.  |
+| `StaleDestinationDeleted` | Normal  | `Delete`   | A selector-matched destination was removed after its namespace stopped matching.  |
+| `DestinationConflict`     | Warning | `Validate` | Destination existed and was not owned by this `Projection`.                       |
+| `DestinationCreateFailed` | Warning | `Create`   | Create on destination failed.                                                     |
+| `DestinationUpdateFailed` | Warning | `Update`   | Update on destination failed.                                                     |
+| `DestinationFetchFailed`  | Warning | `Get`      | Get on an existing destination failed during reconcile.                           |
+| `DestinationWriteFailed`  | Warning | `Write`    | Rollup reason for selector-based Projections where multiple namespaces failed with different reasons. |
+| `NamespaceResolutionFailed` | Warning | `Resolve` | `destination.namespaceSelector` failed to resolve to a namespace list.           |
+| `SourceFetchFailed`       | Warning | `Get`      | Dynamic client `Get` on the source returned an error.                             |
+| `SourceResolutionFailed`  | Warning | `Resolve`  | RESTMapper couldn't resolve `apiVersion`/`kind`.                                  |
+| `SourceOptedOut` / `SourceNotProjectable` | Warning | `Validate` | Source is missing the `projection.be0x74a.io/projectable=true` annotation (allowlist mode) or explicitly sets it to `false`. |
+| `InvalidSpec`             | Warning | `Validate` | `destination.namespace` and `destination.namespaceSelector` both set.             |
 
 ### Querying
 
 All events for one Projection:
 
 ```bash
-kubectl -n <ns> get events \
-  --field-selector involvedObject.name=<projection-name>,involvedObject.kind=Projection \
+kubectl -n <ns> get events.events.k8s.io \
+  --field-selector regarding.name=<projection-name>,regarding.kind=Projection \
   --sort-by=.lastTimestamp
 ```
 
 All Warnings cluster-wide (use this in an on-call runbook):
 
 ```bash
-kubectl get events -A --field-selector type=Warning \
+kubectl get events.events.k8s.io -A --field-selector type=Warning \
   --sort-by=.lastTimestamp \
   | grep Projection
 ```
+
+The `action` is visible via `-o wide` or the full YAML (`-o yaml`), and is a stable verb you can switch on from automation.
 
 ## 3. Prometheus metrics
 

@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -92,7 +92,7 @@ type ProjectionReconciler struct {
 	Scheme        *runtime.Scheme
 	DynamicClient dynamic.Interface
 	RESTMapper    apimeta.RESTMapper
-	Recorder      record.EventRecorder
+	Recorder      events.EventRecorder
 
 	// SourceMode is the cluster-admin-configured policy for which source
 	// objects are projectable. Empty string defaults to SourceModeAllowlist.
@@ -113,12 +113,14 @@ type ProjectionReconciler struct {
 
 // emit records a Kubernetes Event against the Projection. Nil-safe so unit
 // tests that build a reconciler directly (without SetupWithManager) don't
-// need to plumb a recorder.
-func (r *ProjectionReconciler) emit(proj *projectionv1.Projection, eventType, reason, message string) {
+// need to plumb a recorder. action is the UpperCamelCase verb describing
+// what the controller did (e.g. Create, Update, Resolve); reason is the
+// categorical outcome tag.
+func (r *ProjectionReconciler) emit(proj *projectionv1.Projection, eventType, reason, action, message string) {
 	if r.Recorder == nil {
 		return
 	}
-	r.Recorder.Event(proj, eventType, reason, message)
+	r.Recorder.Eventf(proj, nil, eventType, reason, action, "%s", message)
 }
 
 // sourceKey is the canonical string key identifying a source object across
@@ -161,20 +163,23 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if err := r.Update(ctx, proj); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		// Fall through rather than requeuing: r.Update mutated proj in place
+		// with the apiserver-returned ResourceVersion, so the end-of-reconcile
+		// r.Status().Update won't conflict. Avoids a second reconcile round-trip.
 	}
 
 	// Mutual exclusion: namespace and namespaceSelector can't both be set.
 	// Enforced here rather than via CEL because older apiserver CEL versions
 	// (k8s 1.31-) fail to resolve self.namespace for optional string fields.
 	if proj.Spec.Destination.Namespace != "" && proj.Spec.Destination.NamespaceSelector != nil {
-		return r.failDestination(ctx, proj, "InvalidSpec",
-			"destination.namespace and destination.namespaceSelector are mutually exclusive")
+		msg := "destination.namespace and destination.namespaceSelector are mutually exclusive"
+		r.emit(proj, corev1.EventTypeWarning, "InvalidSpec", "Validate", msg)
+		return r.failDestination(ctx, proj, "InvalidSpec", msg)
 	}
 
 	gvr, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
-		return r.failSource(ctx, proj, "SourceResolutionFailed", err.Error())
+		return r.failSource(ctx, proj, "SourceResolutionFailed", "Resolve", err.Error())
 	}
 
 	// Register a watch on this source GVK if we haven't seen it before, so
@@ -191,7 +196,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		Namespace(proj.Spec.Source.Namespace).
 		Get(ctx, proj.Spec.Source.Name, metav1.GetOptions{})
 	if err != nil {
-		return r.failSource(ctx, proj, "SourceFetchFailed", err.Error())
+		return r.failSource(ctx, proj, "SourceFetchFailed", "Get", err.Error())
 	}
 
 	// Opt-in / opt-out policy. If the source says it's not projectable (or
@@ -204,12 +209,13 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			// Don't fail on cleanup error — log and surface the policy
 			// failure as the primary reason.
 		}
-		return r.failSource(ctx, proj, reason, msg)
+		return r.failSource(ctx, proj, reason, "Validate", msg)
 	}
 
 	// Resolve destination namespace(s).
 	destNamespaces, err := r.resolveDestinationNamespaces(ctx, proj)
 	if err != nil {
+		r.emit(proj, corev1.EventTypeWarning, "NamespaceResolutionFailed", "Resolve", err.Error())
 		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", err.Error())
 	}
 
@@ -230,18 +236,18 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		switch fetchErr := r.Get(ctx, key, existing); {
 		case apierrors.IsNotFound(fetchErr):
 			if createErr := r.Create(ctx, dst); createErr != nil {
-				r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed",
+				r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create",
 					fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
 				failures = append(failures, nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()})
 				continue
 			}
-			r.emit(proj, corev1.EventTypeNormal, "Projected",
+			r.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
 				fmt.Sprintf("projected %s %s/%s to %s/%s",
 					source.GroupVersionKind().String(),
 					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
 					dst.GetNamespace(), dst.GetName()))
 		case fetchErr != nil:
-			r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed",
+			r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get",
 				fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
 			failures = append(failures, nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()})
 			continue
@@ -249,7 +255,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if !isOwnedBy(existing, proj) {
 				msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
 					key.Namespace, key.Name)
-				r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", msg)
+				r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", "Validate", msg)
 				failures = append(failures, nsFailure{targetNS, "DestinationConflict", msg})
 				continue
 			}
@@ -266,12 +272,12 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 			dst.SetResourceVersion(existing.GetResourceVersion())
 			if updateErr := r.Update(ctx, dst); updateErr != nil {
-				r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed",
+				r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update",
 					fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
 				failures = append(failures, nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()})
 				continue
 			}
-			r.emit(proj, corev1.EventTypeNormal, "Updated",
+			r.emit(proj, corev1.EventTypeNormal, "Updated", "Update",
 				fmt.Sprintf("updated %s %s/%s to %s/%s",
 					source.GroupVersionKind().String(),
 					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
@@ -289,7 +295,10 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if len(failures) > 0 {
 		// Pick the most specific failure reason. If all failures share the
 		// same reason (e.g. DestinationConflict), use that; otherwise use a
-		// generic rollup reason.
+		// generic rollup reason. No event is emitted here — the inline
+		// per-namespace emits in the loop above already surfaced each
+		// failure with the right action. failDestination only updates
+		// status/conditions/metrics and schedules the requeue.
 		reason := failures[0].reason
 		for _, f := range failures[1:] {
 			if f.reason != reason {
@@ -420,7 +429,7 @@ func (r *ProjectionReconciler) deleteOneDestination(ctx context.Context, proj *p
 		return err
 	}
 	if !isOwnedBy(existing, proj) {
-		r.emit(proj, corev1.EventTypeNormal, "DestinationLeftAlone",
+		r.emit(proj, corev1.EventTypeNormal, "DestinationLeftAlone", "Delete",
 			fmt.Sprintf("%s/%s (not owned)", ns, name))
 		return nil
 	}
@@ -431,7 +440,7 @@ func (r *ProjectionReconciler) deleteOneDestination(ctx context.Context, proj *p
 	if err != nil {
 		return err
 	}
-	r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted",
+	r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted", "Delete",
 		fmt.Sprintf("%s/%s", ns, name))
 	return nil
 }
@@ -475,7 +484,7 @@ func (r *ProjectionReconciler) deleteAllOwnedDestinations(ctx context.Context, p
 			}
 			continue
 		}
-		r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted",
+		r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted", "Delete",
 			fmt.Sprintf("%s/%s", ns, destName))
 	}
 	return firstErr
@@ -550,7 +559,7 @@ func (r *ProjectionReconciler) cleanupStaleDestinations(ctx context.Context, pro
 			}
 			continue
 		}
-		r.emit(proj, corev1.EventTypeNormal, "StaleDestinationDeleted",
+		r.emit(proj, corev1.EventTypeNormal, "StaleDestinationDeleted", "Delete",
 			fmt.Sprintf("%s/%s", ns, destName))
 	}
 	return firstErr
@@ -671,12 +680,12 @@ func setCondition(proj *projectionv1.Projection, condType string, status metav1.
 // SourceResolved flips to False; DestinationWritten is recorded as Unknown
 // because we never got far enough to attempt a write. Ready mirrors the
 // source-side reason.
-func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv1.Projection, reason, msg string) (ctrl.Result, error) {
+func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv1.Projection, reason, action, msg string) (ctrl.Result, error) {
 	setCondition(proj, conditionSourceResolved, metav1.ConditionFalse, reason, msg)
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionUnknown, "SourceNotResolved",
 		"destination write not attempted because source resolution failed")
 	setCondition(proj, conditionReady, metav1.ConditionFalse, reason, msg)
-	r.emit(proj, corev1.EventTypeWarning, reason, msg)
+	r.emit(proj, corev1.EventTypeWarning, reason, action, msg)
 	reconcileTotal.WithLabelValues(resultSourceError).Inc()
 	if err := r.Status().Update(ctx, proj); err != nil {
 		return ctrl.Result{}, err
@@ -687,12 +696,15 @@ func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv
 // failDestination records a failure that happened during the write stage. By
 // the time we get here we've already fetched the source, so SourceResolved is
 // True; DestinationWritten flips to False. Ready mirrors the destination-side
-// reason.
+// reason. Callers are responsible for emitting the event — failDestination
+// only touches status, conditions, and metrics. This keeps the rollup path
+// (which has already fired per-namespace events in the fan-out loop) from
+// double-emitting, which the client-go events broadcaster would otherwise
+// aggregate into a record that drops the action field.
 func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, reason, msg string) (ctrl.Result, error) {
 	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", "")
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionFalse, reason, msg)
 	setCondition(proj, conditionReady, metav1.ConditionFalse, reason, msg)
-	r.emit(proj, corev1.EventTypeWarning, reason, msg)
 	switch reason {
 	case "DestinationConflict":
 		reconcileTotal.WithLabelValues(resultConflict).Inc()
@@ -882,10 +894,6 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.Controller = c
 	r.Cache = mgr.GetCache()
-	// controller-runtime v0.23 deprecated this in favor of GetEventRecorder
-	// returning the new events.EventRecorder (k8s.io/client-go/tools/events).
-	// Migration requires changing every r.Recorder.Event(...) call to Eventf(...)
-	// and re-plumbing FakeRecorder in tests — defer to a focused PR.
-	r.Recorder = mgr.GetEventRecorderFor("projection-controller") //nolint:staticcheck // SA1019: legacy record.EventRecorder still works; migration deferred
+	r.Recorder = mgr.GetEventRecorder("projection-controller")
 	return nil
 }
