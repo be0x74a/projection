@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -30,12 +31,15 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	projectionv1 "github.com/be0x74a/projection/api/v1"
@@ -1251,6 +1255,145 @@ func ensureNamespaceWithLabels(name string, labels map[string]string) {
 		Expect(err).NotTo(HaveOccurred())
 	}
 }
+
+var _ = Describe("Shared source watch (integration with manager)", Ordered, func() {
+	var (
+		sharedMgr    ctrl.Manager
+		sharedCancel context.CancelFunc
+		sharedR      *ProjectionReconciler
+	)
+
+	BeforeAll(func() {
+		// New manager wired to the same envtest cluster. Metrics/probes
+		// disabled, no leader election.
+		var err error
+		sharedMgr, err = ctrl.NewManager(cfg, ctrl.Options{
+			Scheme: k8sClient.Scheme(),
+			Metrics: metricsserver.Options{
+				BindAddress: "0",
+			},
+			HealthProbeBindAddress: "0",
+			LeaderElection:         false,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		httpClient, err := rest.HTTPClientFor(cfg)
+		Expect(err).NotTo(HaveOccurred())
+		mapper, err := apiutil.NewDynamicRESTMapper(cfg, httpClient)
+		Expect(err).NotTo(HaveOccurred())
+		dynClient, err := dynamic.NewForConfig(cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		sharedR = &ProjectionReconciler{
+			Client:        sharedMgr.GetClient(),
+			Scheme:        sharedMgr.GetScheme(),
+			DynamicClient: dynClient,
+			RESTMapper:    mapper,
+			Recorder:      events.NewFakeRecorder(256),
+		}
+		Expect(sharedR.SetupWithManager(sharedMgr)).To(Succeed())
+
+		var mgrCtx context.Context
+		mgrCtx, sharedCancel = context.WithCancel(context.Background())
+		go func() {
+			defer GinkgoRecover()
+			Expect(sharedMgr.Start(mgrCtx)).To(Succeed())
+		}()
+
+		// Wait for the cache to sync before any spec runs.
+		Expect(sharedMgr.GetCache().WaitForCacheSync(mgrCtx)).To(BeTrue())
+	})
+
+	AfterAll(func() {
+		if sharedCancel != nil {
+			sharedCancel()
+		}
+	})
+
+	It("two Projections sharing a source GVK register a single watch and both reconcile", func() {
+		id := nextID()
+		srcNS := uniqueNS("sharedwatch-src")
+		dstNS1 := uniqueNS("sharedwatch-dst1")
+		dstNS2 := uniqueNS("sharedwatch-dst2")
+		srcName := "src-cm-" + id
+		proj1Key := types.NamespacedName{Name: "p-sw1-" + id, Namespace: srcNS}
+		proj2Key := types.NamespacedName{Name: "p-sw2-" + id, Namespace: srcNS}
+
+		ensureNamespace(srcNS)
+		ensureNamespace(dstNS1)
+		ensureNamespace(dstNS2)
+		DeferCleanup(deleteProjection, proj1Key)
+		DeferCleanup(deleteProjection, proj2Key)
+
+		src := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        srcName,
+				Namespace:   srcNS,
+				Annotations: map[string]string{projectableAnnotation: "true"},
+			},
+			Data: map[string]string{"version": "1"},
+		}
+		Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+		for _, spec := range []struct {
+			key    types.NamespacedName
+			destNS string
+		}{
+			{proj1Key, dstNS1},
+			{proj2Key, dstNS2},
+		} {
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: spec.key.Name, Namespace: spec.key.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: srcName, Namespace: srcNS,
+					},
+					Destination: projectionv1.DestinationRef{Namespace: spec.destNS},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		}
+
+		By("both destinations get created by the manager-driven reconciler")
+		for _, dstNS := range []string{dstNS1, dstNS2} {
+			nsCopy := dstNS
+			Eventually(func() string {
+				dst := &corev1.ConfigMap{}
+				_ = k8sClient.Get(ctx,
+					types.NamespacedName{Name: srcName, Namespace: nsCopy}, dst)
+				return dst.Data["version"]
+			}, 10*time.Second, 200*time.Millisecond).Should(Equal("1"),
+				"destination missing or wrong version in %s", nsCopy)
+		}
+
+		By("the reconciler's watched-GVK map has exactly one entry for v1/ConfigMap (idempotent registration)")
+		sharedR.watchedMu.Lock()
+		entries := len(sharedR.watched)
+		_, hasCM := sharedR.watched[schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}]
+		sharedR.watchedMu.Unlock()
+		Expect(entries).To(Equal(1), "expected exactly one registered watch; got %d", entries)
+		Expect(hasCM).To(BeTrue(), "ConfigMap GVK not in watched map")
+
+		By("updating the source — both destinations reflect the change via the shared watch")
+		updated := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx,
+			types.NamespacedName{Name: srcName, Namespace: srcNS}, updated)).To(Succeed())
+		updated.Data["version"] = "2"
+		Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+		for _, dstNS := range []string{dstNS1, dstNS2} {
+			nsCopy := dstNS
+			Eventually(func() string {
+				dst := &corev1.ConfigMap{}
+				_ = k8sClient.Get(ctx,
+					types.NamespacedName{Name: srcName, Namespace: nsCopy}, dst)
+				return dst.Data["version"]
+			}, 10*time.Second, 200*time.Millisecond).Should(Equal("2"),
+				"destination in %s didn't receive the source update", nsCopy)
+		}
+	})
+})
 
 // Silence unused-import warnings when the file is edited in isolation.
 var _ = client.Object(&corev1.ConfigMap{})
