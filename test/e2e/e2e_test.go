@@ -532,6 +532,89 @@ spec:
 			}, 3*time.Second, 500*time.Millisecond).Should(Equal(cmName))
 		})
 	})
+
+	Context("Source deletion", func() {
+		It("cleans up the destination when the source is deleted and releases the Projection finalizer", func() {
+			id := nextID()
+			srcNS := "e2e-src-" + id
+			dstNS := "e2e-dst-" + id
+			projName := "p-srcdel-" + id
+			cmName := "payload-" + id
+
+			createNamespace(srcNS)
+			createNamespace(dstNS)
+			DeferCleanup(func() {
+				kubectlDelete("ns", srcNS)
+				kubectlDelete("ns", dstNS)
+			})
+
+			By("creating the source ConfigMap and the Projection")
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
+data:
+  k: v
+`, cmName, srcNS))).To(Succeed())
+
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: %s
+    namespace: %s
+  destination:
+    namespace: %s
+`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+
+			By("waiting for the destination to appear")
+			Eventually(func() string {
+				return getJSONPath("{.metadata.name}", "cm", cmName, "-n", dstNS)
+			}, defaultEventually, defaultTick).Should(Equal(cmName))
+
+			By("deleting the source ConfigMap")
+			_, err := utils.Run(exec.Command("kubectl", "delete", "configmap", cmName,
+				"-n", srcNS, "--wait=true", "--timeout=10s"))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("the destination is cleaned up")
+			Eventually(func() string {
+				out, _ := utils.Run(exec.Command("kubectl", "get", "cm", cmName, "-n", dstNS,
+					"--ignore-not-found=true", "-o", "name"))
+				return strings.TrimSpace(string(out))
+			}, defaultEventually, defaultTick).Should(BeEmpty())
+
+			By("the Projection reports SourceResolved=False reason=SourceDeleted")
+			Eventually(func(g Gomega) {
+				reason := getJSONPath(
+					`{.status.conditions[?(@.type=="SourceResolved")].reason}`,
+					"projection", projName, "-n", srcNS)
+				status := getJSONPath(
+					`{.status.conditions[?(@.type=="SourceResolved")].status}`,
+					"projection", projName, "-n", srcNS)
+				g.Expect(status).To(Equal("False"))
+				g.Expect(reason).To(Equal("SourceDeleted"))
+			}, defaultEventually, defaultTick).Should(Succeed())
+
+			By("deleting the Projection — finalizer releases cleanly (no stuck finalizer)")
+			_, err = utils.Run(exec.Command("kubectl", "delete", "projection", projName,
+				"-n", srcNS, "--wait=true", "--timeout=30s"))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("the Projection is fully gone")
+			out, _ := utils.Run(exec.Command("kubectl", "get", "projection", projName,
+				"-n", srcNS, "--ignore-not-found=true", "-o", "name"))
+			Expect(strings.TrimSpace(string(out))).To(BeEmpty())
+		})
+	})
 })
 
 // kubectlContext returns the current kubectl context, best-effort.
