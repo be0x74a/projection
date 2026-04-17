@@ -202,7 +202,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		Namespace(proj.Spec.Source.Namespace).
 		Get(ctx, proj.Spec.Source.Name, metav1.GetOptions{})
 	if err != nil {
-		return r.failSource(ctx, proj, "SourceFetchFailed", "Get", err.Error())
+		return r.handleSourceFetchError(ctx, proj, gvr, err)
 	}
 
 	// Opt-in / opt-out policy. If the source says it's not projectable (or
@@ -494,6 +494,29 @@ func (r *ProjectionReconciler) deleteAllOwnedDestinations(ctx context.Context, p
 			fmt.Sprintf("%s/%s", ns, destName))
 	}
 	return firstErr
+}
+
+// handleSourceFetchError funnels errors from the source-object Get call. A
+// 404 is a distinct signal ("source has been deleted"): we clean up every
+// owned destination (single or selector-based fan-out) and surface
+// SourceResolved=False reason=SourceDeleted via failSource, which emits a
+// single Warning SourceDeleted event (matches the SourceOptedOut /
+// SourceNotProjectable opt-out precedent). Cleanup errors are logged but do
+// not block the status update — same opt-out cleanup pattern used when a
+// source stops being projectable. All other errors (transient connectivity,
+// RBAC blips, 5xx) keep the SourceFetchFailed behavior and leave
+// destinations in place.
+func (r *ProjectionReconciler) handleSourceFetchError(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, err error) (ctrl.Result, error) {
+	if !apierrors.IsNotFound(err) {
+		return r.failSource(ctx, proj, "SourceFetchFailed", "Get", err.Error())
+	}
+	logger := log.FromContext(ctx)
+	if cleanupErr := r.deleteAllOwnedDestinations(ctx, proj, gvr); cleanupErr != nil {
+		logger.Error(cleanupErr, "cleaning up destinations after source deletion")
+	}
+	return r.failSource(ctx, proj, "SourceDeleted", "Get",
+		fmt.Sprintf("source %s/%s has been deleted",
+			proj.Spec.Source.Namespace, proj.Spec.Source.Name))
 }
 
 // resolveDestinationNamespaces returns the list of namespace names the

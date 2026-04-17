@@ -96,6 +96,24 @@ func reconcileOnce(r *ProjectionReconciler, key types.NamespacedName) reconcile.
 	return res
 }
 
+// idCounter feeds nextID for tests that need a unique-per-spec suffix for
+// object names (not namespaces — use uniqueNS for those).
+var idCounter uint64
+
+func nextID() string {
+	return fmt.Sprintf("%d", atomic.AddUint64(&idCounter, 1))
+}
+
+// findCondition returns a pointer to the condition of the given type, or nil.
+func findCondition(conds []metav1.Condition, t string) *metav1.Condition {
+	for i := range conds {
+		if conds[i].Type == t {
+			return &conds[i]
+		}
+	}
+	return nil
+}
+
 func ensureNamespace(name string) {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	err := k8sClient.Create(ctx, ns)
@@ -1076,6 +1094,147 @@ var _ = Describe("Projection Controller (integration)", func() {
 				HaveField("Reason", Equal("InvalidSpec")),
 				HaveField("Message", ContainSubstring("mutually exclusive")),
 			)))
+		})
+	})
+
+	Context("Source deletion", func() {
+		It("cleans up the destination when the source is deleted", func() {
+			id := nextID()
+			srcNS := uniqueNS("mirror-srcdel-src")
+			dstNS := uniqueNS("mirror-srcdel-dst")
+			projKey := types.NamespacedName{Name: "p-srcdel-" + id, Namespace: srcNS}
+			srcName := "src-cm-" + id
+
+			ensureNamespace(srcNS)
+			ensureNamespace(dstNS)
+			DeferCleanup(deleteProjection, projKey)
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        srcName,
+					Namespace:   srcNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"key": "value"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: srcName, Namespace: srcNS,
+					},
+					Destination: projectionv1.DestinationRef{Namespace: dstNS},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+
+			By("first reconcile — destination appears")
+			reconcileOnce(r, projKey)
+			Expect(k8sClient.Get(ctx,
+				types.NamespacedName{Name: srcName, Namespace: dstNS}, &corev1.ConfigMap{})).To(Succeed())
+
+			By("deleting the source")
+			Expect(k8sClient.Delete(ctx, src)).To(Succeed())
+
+			By("second reconcile — destination is cleaned up, status reflects SourceDeleted")
+			_ = drainEvents(r)
+			reconcileOnce(r, projKey)
+
+			Eventually(func() error {
+				return k8sClient.Get(ctx,
+					types.NamespacedName{Name: srcName, Namespace: dstNS}, &corev1.ConfigMap{})
+			}, 2*time.Second, 100*time.Millisecond).Should(MatchError(ContainSubstring("not found")))
+
+			var fresh projectionv1.Projection
+			Expect(k8sClient.Get(ctx, projKey, &fresh)).To(Succeed())
+
+			srcResolved := findCondition(fresh.Status.Conditions, "SourceResolved")
+			Expect(srcResolved).NotTo(BeNil())
+			Expect(srcResolved.Status).To(Equal(metav1.ConditionFalse))
+			Expect(srcResolved.Reason).To(Equal("SourceDeleted"))
+
+			destWritten := findCondition(fresh.Status.Conditions, "DestinationWritten")
+			Expect(destWritten).NotTo(BeNil())
+			Expect(destWritten.Status).To(Equal(metav1.ConditionUnknown))
+			Expect(destWritten.Reason).To(Equal("SourceNotResolved"))
+
+			events := drainEvents(r)
+			Expect(events).To(ContainElement(ContainSubstring("Warning SourceDeleted")),
+				"expected exactly one Warning SourceDeleted event, got: %v", events)
+		})
+
+		It("cleans up every selector-based destination when the source is deleted", func() {
+			id := nextID()
+			srcNS := uniqueNS("mirror-srcdel-sel-src")
+			projKey := types.NamespacedName{Name: "p-srcdel-sel-" + id, Namespace: srcNS}
+			srcName := "src-cm-" + id
+			label := "mirror-srcdel-" + id
+
+			ensureNamespace(srcNS)
+			DeferCleanup(deleteProjection, projKey)
+
+			var destNS [3]string
+			for i := range destNS {
+				destNS[i] = uniqueNS("mirror-srcdel-sel-dst")
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   destNS[i],
+						Labels: map[string]string{label: "true"},
+					},
+				}
+				Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			}
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        srcName,
+					Namespace:   srcNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"k": "v"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: srcName, Namespace: srcNS,
+					},
+					Destination: projectionv1.DestinationRef{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{label: "true"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+
+			By("first reconcile — destinations appear in all 3 namespaces")
+			reconcileOnce(r, projKey)
+			for _, ns := range destNS {
+				Expect(k8sClient.Get(ctx,
+					types.NamespacedName{Name: srcName, Namespace: ns}, &corev1.ConfigMap{})).
+					To(Succeed(), "destination missing in %s", ns)
+			}
+
+			By("deleting the source and reconciling")
+			Expect(k8sClient.Delete(ctx, src)).To(Succeed())
+			reconcileOnce(r, projKey)
+
+			By("all three destinations are cleaned up")
+			for _, ns := range destNS {
+				nsCopy := ns
+				Eventually(func() error {
+					return k8sClient.Get(ctx,
+						types.NamespacedName{Name: srcName, Namespace: nsCopy}, &corev1.ConfigMap{})
+				}, 2*time.Second, 100*time.Millisecond).Should(MatchError(ContainSubstring("not found")),
+					"destination lingered in %s", nsCopy)
+			}
 		})
 	})
 })
