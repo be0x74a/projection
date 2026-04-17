@@ -51,7 +51,6 @@ const (
 	finalizerName         = "projection.be0x74a.io/finalizer"
 	ownedByAnnotation     = "projection.be0x74a.io/owned-by"
 	projectableAnnotation = "projection.be0x74a.io/projectable"
-	requeueInterval       = 30 * time.Second
 
 	conditionReady              = "Ready"
 	conditionSourceResolved     = "SourceResolved"
@@ -97,6 +96,13 @@ type ProjectionReconciler struct {
 	// SourceMode is the cluster-admin-configured policy for which source
 	// objects are projectable. Empty string defaults to SourceModeAllowlist.
 	SourceMode SourceMode
+
+	// RequeueInterval controls how long the reconciler sleeps before
+	// retrying after a successful or failed reconcile. Configured via the
+	// --requeue-interval CLI flag. Defaults to 30 seconds when unset
+	// (SetupWithManager fills the zero value so unit-test constructions
+	// don't need to set it explicitly).
+	RequeueInterval time.Duration
 
 	// Controller is the underlying controller.Controller we built in
 	// SetupWithManager. We need it so Reconcile can register new source
@@ -690,7 +696,7 @@ func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv
 	if err := r.Status().Update(ctx, proj); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: requeueInterval}, nil
+	return ctrl.Result{RequeueAfter: r.RequeueInterval}, nil
 }
 
 // failDestination records a failure that happened during the write stage. By
@@ -714,7 +720,7 @@ func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projec
 	if err := r.Status().Update(ctx, proj); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: requeueInterval}, nil
+	return ctrl.Result{RequeueAfter: r.RequeueInterval}, nil
 }
 
 // markAllReady flips all three conditions to True in a single status update.
@@ -861,6 +867,9 @@ func (r *ProjectionReconciler) mapNamespace(ctx context.Context, _ client.Object
 //  3. A Namespace watch triggers re-reconciliation of selector-based Projections
 //     whenever the set of namespaces changes.
 func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.RequeueInterval == 0 {
+		r.RequeueInterval = 30 * time.Second
+	}
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, sourceIndex,
 		func(obj client.Object) []string {
 			p, ok := obj.(*projectionv1.Projection)
