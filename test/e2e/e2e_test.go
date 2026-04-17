@@ -778,6 +778,53 @@ spec:
 				"destination-ns-terminating path emitted an unreasonable number of events; possible busy-loop")
 		})
 	})
+
+	Context("Non-existent source Kind", func() {
+		It("surfaces SourceResolved=False reason=SourceResolutionFailed when the Kind is unknown", func() {
+			id := nextID()
+			srcNS := "e2e-src-" + id
+			projName := "p-badkind-" + id
+
+			createNamespace(srcNS)
+			DeferCleanup(func() {
+				kubectlDelete("projection", projName, "-n", srcNS)
+				kubectlDelete("ns", srcNS)
+			})
+
+			By("creating a Projection referencing a Kind the RESTMapper can't resolve")
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigNap
+    name: nonexistent
+    namespace: %s
+  destination:
+    namespace: %s
+`, projName, srcNS, srcNS, srcNS))).To(Succeed())
+
+			By("Projection reports SourceResolved=False reason=SourceResolutionFailed")
+			Eventually(func(g Gomega) {
+				status := getJSONPath(
+					`{.status.conditions[?(@.type=="SourceResolved")].status}`,
+					"projection", projName, "-n", srcNS)
+				reason := getJSONPath(
+					`{.status.conditions[?(@.type=="SourceResolved")].reason}`,
+					"projection", projName, "-n", srcNS)
+				g.Expect(status).To(Equal("False"))
+				g.Expect(reason).To(Equal("SourceResolutionFailed"))
+			}, defaultEventually, defaultTick).Should(Succeed())
+
+			By("Projection remains deletable (no stuck finalizer from a reconcile that never completed)")
+			_, err := utils.Run(exec.Command("kubectl", "delete", "projection", projName,
+				"-n", srcNS, "--wait=true", "--timeout=30s"))
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
 })
 
 // kubectlContext returns the current kubectl context, best-effort.
