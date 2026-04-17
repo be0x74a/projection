@@ -1,32 +1,13 @@
-# CRD reference
+# CRD behavior and examples
 
-This is the hand-written reference for `projection.be0x74a.io/v1` `Projection`. It mirrors the validation markers in `api/v1/projection_types.go` exactly.
+This page covers cross-field invariants, controller-side condition reasons, the finalizer/annotation the operator manages, and fully worked YAML examples for `projection.be0x74a.io/v1` `Projection`. For the field-by-field API schema — types, validation rules, defaults — see the auto-generated [API reference](api-reference.md), which is regenerated from `api/v1/projection_types.go` by `make docs-ref` and verified in CI.
 
 - **API group**: `projection.be0x74a.io`
 - **API version**: `v1` (storage version; alpha stability — see [Limitations](limitations.md))
 - **Kind**: `Projection`
 - **Scope**: Namespaced
 
-## `spec.source` (required)
-
-Identifies the object to mirror. All four fields are required.
-
-| Field        | Type   | Required | Default | Validation                                                                   | Description                                          |
-| ------------ | ------ | -------- | ------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `apiVersion` | string | yes      | —       | `MinLength=1`, pattern `^([a-z0-9.-]+/)?v[0-9]+((alpha|beta)[0-9]+)?$`       | e.g. `v1`, `apps/v1`, `cert-manager.io/v1`.          |
-| `kind`       | string | yes      | —       | `MinLength=1`, pattern `^[A-Z][A-Za-z0-9]*$` (PascalCase)                    | e.g. `ConfigMap`, `Secret`, `Certificate`.           |
-| `name`       | string | yes      | —       | `MinLength=1`, `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` (DNS-1123) | Name of the source object.                     |
-| `namespace`  | string | yes      | —       | `MinLength=1`, `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` (DNS-1123) | Namespace of the source object.                |
-
-## `spec.destination` (optional)
-
-Where the mirrored object is written. All fields are optional; leaving them unset produces sensible defaults.
-
-| Field               | Type                   | Required | Default                        | Validation                                                                   | Description                                                                                                    |
-| ------------------- | ---------------------- | -------- | ------------------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `namespace`         | string                 | no       | The Projection's own namespace | `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`                    | Single destination namespace. Mutually exclusive with `namespaceSelector`.                                     |
-| `namespaceSelector` | `metav1.LabelSelector` | no       | —                              | Standard label selector (matchLabels/matchExpressions)                       | Fan-out: project into every namespace matching the selector. Mutually exclusive with `namespace`.              |
-| `name`              | string                 | no       | `spec.source.name`             | `MaxLength=63`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`                    | Name at each destination.                                                                                      |
+## Destination invariants
 
 Setting both `namespace` and `namespaceSelector` is rejected by the reconciler with `DestinationWritten=False reason=InvalidSpec`. (This invariant is enforced controller-side rather than via CEL for cross-apiserver-version compatibility.)
 
@@ -34,14 +15,7 @@ When `namespaceSelector` is set, the controller projects into every matching nam
 
 Note: the destination `Kind` is always the same as the source `Kind` — there is no transformation.
 
-## `spec.overlay` (optional)
-
-Metadata applied on top of the copied source. Overlay entries win on key conflict with source metadata. The overlay never touches `spec`/`data`/etc.; it is metadata only.
-
-| Field         | Type                | Required | Default | Description                                                                                      |
-| ------------- | ------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `labels`      | `map[string]string` | no       | `{}`    | Merged with the source's `metadata.labels`. Overlay wins on conflict.                            |
-| `annotations` | `map[string]string` | no       | `{}`    | Merged with the source's `metadata.annotations`. Overlay wins on conflict.                       |
+## Overlay invariants
 
 The controller always stamps `projection.be0x74a.io/owned-by: <projection-ns>/<projection-name>` on the destination, regardless of overlay. Do not attempt to set this key via overlay — it will be overwritten by the controller on every reconcile.
 
