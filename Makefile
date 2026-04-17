@@ -68,6 +68,14 @@ test: manifests generate fmt vet envtest ## Run tests.
 test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
+.PHONY: helm-test
+helm-test: ## Run helm-unittest on the chart. Installs the plugin on first run.
+	@if ! helm plugin list | grep -q unittest; then \
+	    echo "Installing helm-unittest plugin..."; \
+	    helm plugin install https://github.com/helm-unittest/helm-unittest; \
+	fi
+	helm unittest charts/projection
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run

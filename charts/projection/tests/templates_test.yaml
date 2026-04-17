@@ -1,0 +1,74 @@
+suite: ServiceMonitor / NetworkPolicy / PodDisruptionBudget opt-in
+templates:
+  - servicemonitor.yaml
+  - networkpolicy.yaml
+  - poddisruptionbudget.yaml
+
+tests:
+  - it: renders no ServiceMonitor by default
+    template: servicemonitor.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders ServiceMonitor when enabled
+    template: servicemonitor.yaml
+    set:
+      serviceMonitor.enabled: true
+    asserts:
+      - isKind:
+          of: ServiceMonitor
+      - equal:
+          path: spec.endpoints[0].port
+          value: https
+      - equal:
+          path: spec.endpoints[0].scheme
+          value: https
+      - equal:
+          path: spec.endpoints[0].path
+          value: /metrics
+      - equal:
+          path: spec.namespaceSelector.matchNames[0]
+          value: NAMESPACE
+
+  - it: renders no NetworkPolicy by default
+    template: networkpolicy.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders NetworkPolicy with egress-only policyTypes when enabled
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+      - equal:
+          path: spec.policyTypes
+          value:
+            - Egress
+      - contains:
+          path: spec.egress[1].ports
+          content:
+            protocol: UDP
+            port: 53
+
+  - it: renders no PodDisruptionBudget by default
+    template: poddisruptionbudget.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders PodDisruptionBudget with minAvailable when enabled
+    template: poddisruptionbudget.yaml
+    set:
+      podDisruptionBudget.enabled: true
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.minAvailable
+          value: 1
+      - notExists:
+          path: spec.maxUnavailable
