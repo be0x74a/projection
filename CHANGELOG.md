@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `resolveGVR` now fails fast with a clear message when a `Projection` points at a cluster-scoped Kind (e.g. `Namespace`, `ClusterRole`, `StorageClass`). Previously the dynamic client would issue a malformed URL and surface a confusing 404 as `SourceFetchFailed`; now the same case reports `SourceResolved=False` with message `<apiVersion>/<Kind> is cluster-scoped; projection only mirrors namespaced resources`.
+- Destination-side failures no longer double-emit the same Event (once inline per namespace, once again through the failure funnel). Keeps the `action` field populated on the surviving record instead of being stripped by client-go's event aggregation.
+- Unicode curly quotes in kubebuilder markers that prevented CRD installation on some apiserver versions.
 
 ### ⚠ BREAKING CHANGES
 
@@ -19,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can opt in with the controller flag `--source-mode=permissive`
   (Helm value: `sourceMode: permissive`). The annotation value `"false"`
   is always honored as a source-owner veto regardless of mode.
+- **Kubernetes Events are now written through `events.k8s.io/v1`** instead of the legacy `core/v1`. Automations using `kubectl get events --field-selector involvedObject.name=<proj>,involvedObject.kind=Projection` should switch to `kubectl get events.events.k8s.io --field-selector regarding.name=<proj>,regarding.kind=Projection`. Event `reason` strings are unchanged.
 
 ### Added
 
@@ -32,6 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing destination is garbage-collected.
 - Unit tests for `checkSourceProjectable` and two new envtest specs for
   the allowlist and opt-out paths.
+- **Multi-destination fan-out** via `spec.destination.namespaceSelector` (a `metav1.LabelSelector`). One Projection mirrors its source into every namespace matching the selector; destinations are added and removed as namespaces gain or lose the matching label. Mutually exclusive with `spec.destination.namespace`.
+- Events now carry an `action` verb alongside `reason`, taxonomised as `Create` / `Update` / `Delete` / `Get` / `Validate` / `Resolve` / `Write`. Visible via `kubectl get events.events.k8s.io -o wide` or `-o yaml`.
+- New Event reasons: `StaleDestinationDeleted` (Normal — selector no longer matches a previously-owned destination's namespace), `NamespaceResolutionFailed` (Warning — the selector failed to resolve), `DestinationWriteFailed` (Warning — rollup when multiple namespaces fail with different reasons), `InvalidSpec` (Warning — `namespace` and `namespaceSelector` both set).
+- Sample CR `config/samples/projection_v1_projection_selector.yaml` and example `examples/configmap-fan-out-selector.yaml` demonstrating selector-based fan-out.
+- Six new integration specs covering the fan-out path: happy path, late namespace addition, stale cleanup, deletion cleanup, partial failure, and mutual-exclusion CEL validation.
+
+### Changed
+
+- Finalizer deletion path now scans every namespace to find owned destinations. Necessary for selector-based Projections whose destination set at deletion time may not match the original selector.
+- The controller now watches `Namespace` objects so selector-based Projections re-reconcile automatically when the matching set changes.
+- `Reconcile` no longer performs a separate pass to add the finalizer — finalizer-add and the first real reconcile happen in a single pass, halving the initial reconcile count per Projection.
 
 ## [0.1.0-alpha] - 2026-04-13
 
