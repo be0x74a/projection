@@ -76,6 +76,14 @@ helm-test: ## Run helm-unittest on the chart. Installs the plugin on first run.
 	fi
 	helm unittest charts/projection
 
+.PHONY: docs-ref
+docs-ref: crd-ref-docs ## Regenerate docs/api-reference.md from api/v1 types + kubebuilder markers.
+	$(CRD_REF_DOCS) \
+	  --config=hack/crd-ref-docs/config.yaml \
+	  --source-path=./api/v1 \
+	  --renderer=markdown \
+	  --output-path=docs/api-reference.md
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
@@ -190,6 +198,14 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
+CRD_REF_DOCS_VERSION ?= v0.3.0
+
+.PHONY: crd-ref-docs
+crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
+$(CRD_REF_DOCS): $(LOCALBIN)
+	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,$(CRD_REF_DOCS_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

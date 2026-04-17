@@ -1,0 +1,28 @@
+# Configuration for elastic/crd-ref-docs.
+# Rendered file: docs/api-reference.md
+# Regenerate with: make docs-ref
+
+processor:
+  # Strip Go-doc markers (+kubebuilder:validation:...) out of the rendered
+  # descriptions — markers are machine-readable and surface separately.
+  useRawDocstring: false
+  # Skip struct fields that are boilerplate in every Kubernetes type.
+  ignoreFields:
+    - "^TypeMeta$"
+    - "^ObjectMeta$"
+
+render:
+  # Pin the K8s version so external-type links point at a stable API reference.
+  kubernetesVersion: "1.31"
+  # External types referenced from our structs. crd-ref-docs can't follow them
+  # into their source packages, so we tell it where to link instead.
+  knownTypes:
+    - name: LabelSelector
+      package: k8s.io/apimachinery/pkg/apis/meta/v1
+      link: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta
+    - name: Condition
+      package: k8s.io/apimachinery/pkg/apis/meta/v1
+      link: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta
+    - name: ObjectMeta
+      package: k8s.io/apimachinery/pkg/apis/meta/v1
+      link: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta
