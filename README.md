@@ -134,7 +134,8 @@ See [docs/concepts.md](docs/concepts.md) for the full picture, [docs/observabili
 
 - [Getting started](docs/getting-started.md)
 - [Concepts](docs/concepts.md)
-- [CRD reference](docs/crd-reference.md)
+- [API reference](docs/api-reference.md)
+- [CRD behavior and examples](docs/crd-reference.md)
 - [Use cases](docs/use-cases.md)
 - [Comparison vs alternatives](docs/comparison.md)
 - [Observability](docs/observability.md)
