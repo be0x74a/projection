@@ -72,7 +72,7 @@ test-e2e:
 helm-test: ## Run helm-unittest on the chart. Installs the plugin on first run.
 	@if ! helm plugin list | grep -q unittest; then \
 	    echo "Installing helm-unittest plugin..."; \
-	    helm plugin install https://github.com/helm-unittest/helm-unittest; \
+	    helm plugin install --verify=false https://github.com/helm-unittest/helm-unittest; \
 	fi
 	helm unittest charts/projection
 
