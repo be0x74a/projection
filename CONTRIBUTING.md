@@ -91,6 +91,19 @@ A couple of gotchas worth knowing before you lose time to them:
   registry directly (see `hack/observe.sh` area of the README for the
   exact secret+SA patch commands).
 
+## Adding a Kind to `droppedSpecFieldsByGVK`
+
+Some Kinds carry apiserver-allocated spec fields that must be stripped before mirroring (see [limitations.md](./docs/limitations.md#some-kinds-need-extra-stripping-rules)). The map at `internal/controller/projection_controller.go` grows case-by-case as users hit gaps. To add an entry:
+
+1. **Confirm the evidence.** There must be a reproducible `spec.FIELD: field is immutable` (or equivalent) error when creating the destination against a real apiserver. Defaulted fields re-apply on the destination and do not belong in this map. Speculation is not enough — the cost of a wrong entry is silently dropping user data.
+2. **Write the reproducer in the PR body.** Include the source object YAML, the Projection YAML, and the apiserver error message. This is what the reviewer verifies against.
+3. **Add the map entry** at `internal/controller/projection_controller.go` (keep a string-valued path first, for the fuzz seed).
+4. **Add a unit subtest** in `internal/controller/build_destination_test.go` mirroring the existing `"strips apiserver-allocated Kind spec fields"` cases: populate the source, assert the fields are stripped, assert user-set fields on the same object survive.
+5. **Add a fuzz seed** in `internal/controller/fuzz_test.go`'s `FuzzPreserveAPIServerAllocatedFields`.
+6. **Document** — add a row to the limitations.md table and a `### Added` bullet to `CHANGELOG.md` under `[Unreleased]`.
+
+The umbrella issue tracking this work is [#32](https://github.com/be0x74a/projection/issues/32).
+
 ## Code of Conduct
 
 This project follows the [Contributor Covenant](./CODE_OF_CONDUCT.md).
