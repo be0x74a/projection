@@ -17,6 +17,8 @@ resources across namespaces.
   secure-by-default with the controller-runtime authn/authz filter).
 - A `metrics-reader` ClusterRole you can bind to a scrape identity.
 
+**Optional production-grade resources** (all opt-in): a ServiceMonitor for prometheus-operator scrape wiring (`serviceMonitor.enabled`), a NetworkPolicy locking controller egress to the Kubernetes API and cluster DNS (`networkPolicy.enabled`), and a PodDisruptionBudget keeping the controller available through voluntary disruptions (`podDisruptionBudget.enabled`).
+
 ## Prerequisites
 
 - Kubernetes >= 1.25
@@ -102,6 +104,17 @@ multiple releases.
 | `serviceAccount.name`               | `""`                          | Override generated ServiceAccount name.                                     |
 | `serviceAccount.annotations`        | `{}`                          | Annotations for the ServiceAccount (e.g. IRSA).                            |
 | `crds.install`                      | `true`                        | Documentation flag — Helm always installs `crds/` on first install.         |
+| `serviceMonitor.enabled`            | `false`                       | Render a ServiceMonitor selecting the metrics Service. Requires `monitoring.coreos.com/v1`. |
+| `serviceMonitor.interval`           | `30s`                         | Scrape interval for the ServiceMonitor.                                     |
+| `serviceMonitor.scrapeTimeout`      | `10s`                         | Scrape timeout for the ServiceMonitor.                                      |
+| `serviceMonitor.labels`             | `{}`                          | Extra labels for prometheus-operator's `serviceMonitorSelector`.            |
+| `serviceMonitor.tlsConfig`          | `insecureSkipVerify: true`    | TLS config for scraping the HTTPS metrics endpoint.                         |
+| `networkPolicy.enabled`             | `false`                       | Render a NetworkPolicy restricting controller egress.                       |
+| `networkPolicy.dns`                 | `kube-system / k8s-app=kube-dns / 53` | Cluster DNS pod selector for the DNS egress rule.                     |
+| `networkPolicy.extraEgress`         | `[]`                          | Extra egress rules (each a NetworkPolicyEgressRule).                        |
+| `podDisruptionBudget.enabled`       | `false`                       | Render a PodDisruptionBudget for the controller Deployment.                 |
+| `podDisruptionBudget.minAvailable`  | `1`                           | Minimum pods available. Set exactly one of minAvailable / maxUnavailable.   |
+| `podDisruptionBudget.maxUnavailable`| `null`                        | Max pods unavailable. Leave null when using minAvailable.                   |
 
 ## Example
 

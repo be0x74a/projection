@@ -51,6 +51,14 @@ export KUBEBUILDER_ASSETS="$(./bin/setup-envtest use 1.31.0 --bin-dir ./bin -p p
 go test ./internal/controller/ -run TestName -v
 ```
 
+Helm chart tests (requires the [helm-unittest](https://github.com/helm-unittest/helm-unittest) plugin):
+
+```bash
+make helm-test
+```
+
+`make helm-test` auto-installs the plugin on first run.
+
 ## Submitting changes
 
 1. Fork the repo and create a branch off `main`.

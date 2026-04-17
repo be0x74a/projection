@@ -126,3 +126,49 @@ crds:
   # effect on upgrade or uninstall; this flag is purely for documentation
   # consistency (Helm itself always reads crds/ on first install).
   install: true
+
+# -- ServiceMonitor for prometheus-operator integration. Opt-in; requires the
+# monitoring.coreos.com/v1 CRD installed in the cluster.
+serviceMonitor:
+  # -- If true, render a ServiceMonitor selecting the metrics Service.
+  enabled: false
+  # -- Scrape interval.
+  interval: 30s
+  # -- Scrape timeout.
+  scrapeTimeout: 10s
+  # -- Extra labels added to the ServiceMonitor (for prometheus-operator's
+  # serviceMonitorSelector matching).
+  labels: {}
+  # -- TLS configuration for scraping the HTTPS metrics endpoint. The default
+  # controller-runtime cert is self-signed, so insecureSkipVerify is enabled
+  # by default. Override to point at a CA bundle if you pin a custom cert.
+  tlsConfig:
+    insecureSkipVerify: true
+
+# -- NetworkPolicy restricting controller egress to the Kubernetes API server
+# and cluster DNS. Opt-in because egress lockdown can surprise dev clusters.
+networkPolicy:
+  # -- If true, render a NetworkPolicy for the controller pod.
+  enabled: false
+  # -- Cluster DNS selector (defaults to standard kube-dns in kube-system).
+  dns:
+    namespace: kube-system
+    podLabels:
+      k8s-app: kube-dns
+    port: 53
+  # -- Additional egress rules (each entry is a NetworkPolicyEgressRule).
+  # Use this to allow the controller to reach private registries, external
+  # webhooks, etc.
+  extraEgress: []
+
+# -- PodDisruptionBudget to keep the controller available through voluntary
+# disruptions. Opt-in. With replicaCount=1, minAvailable=1 blocks drains —
+# either raise replicaCount or switch to maxUnavailable: 1.
+podDisruptionBudget:
+  # -- If true, render a PodDisruptionBudget for the controller Deployment.
+  enabled: false
+  # -- Minimum number of pods that must remain available.
+  minAvailable: 1
+  # -- Maximum number of pods allowed to be unavailable. Set exactly one of
+  # minAvailable / maxUnavailable; leave the other as null.
+  maxUnavailable: null

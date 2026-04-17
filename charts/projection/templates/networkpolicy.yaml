@@ -1,0 +1,40 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "projection.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "projection.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "projection.selectorLabels" . | nindent 6 }}
+      control-plane: controller-manager
+  policyTypes:
+    - Egress
+  egress:
+    # Kubernetes API server (portable: any destination on 443)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    # Cluster DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dns.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.dns.podLabels | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.networkPolicy.dns.port }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.dns.port }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

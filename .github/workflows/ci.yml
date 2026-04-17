@@ -115,3 +115,18 @@ jobs:
           name: e2e-logs
           path: e2e-logs
           if-no-files-found: ignore
+
+  chart-test:
+    name: Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Install helm-unittest plugin
+        run: helm plugin install --verify=false https://github.com/helm-unittest/helm-unittest
+      - name: Lint chart
+        run: helm lint charts/projection
+      - name: Run chart tests
+        run: helm unittest charts/projection
