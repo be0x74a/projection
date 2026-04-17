@@ -4,11 +4,11 @@
 
 ## Known limitations
 
-### Single destination per `Projection`
+### Selector fan-out applies the same overlay to every destination
 
-One `Projection` CR produces exactly one destination object. If you need to mirror one source into five namespaces, you write five `Projection` CRs. The [multi-destination example](https://github.com/be0x74a/projection/blob/main/examples/multiple-destinations-from-one-source.yaml) shows the pattern; tools like Kustomize / Helm / Argo ApplicationSets handle the generation well.
+A `Projection` with `spec.destination.namespaceSelector` mirrors its source into every matching namespace and rolls up status into a single `DestinationWritten` condition — see the [fan-out example](https://github.com/be0x74a/projection/blob/main/examples/configmap-fan-out-selector.yaml). The `overlay` block applies uniformly: every destination gets the same labels and annotations.
 
-Trade-off: this keeps per-destination status independent — a `DestinationConflict` in one namespace doesn't mark the others as failed. Multi-destination via label selector is on the roadmap (below).
+If you need **distinct overlays per destination** (different `tenant:` labels, per-namespace annotations, etc.), write one `Projection` per destination instead — see the [multi-destination example](https://github.com/be0x74a/projection/blob/main/examples/multiple-destinations-from-one-source.yaml). That pattern also keeps per-destination status independent: a `DestinationConflict` in one namespace doesn't mark the others as failed.
 
 ### Same-cluster only
 
@@ -47,29 +47,15 @@ The CRD stability is alpha. `projection.be0x74a.io/v1` is the storage version, a
 
 In rough priority order:
 
-### 1. Multi-destination via label selector
-
-Let one `Projection` target many namespaces:
-
-```yaml
-spec:
-  destinations:
-    namespaceSelector:
-      matchLabels:
-        tenant-tier: shared
-```
-
-Design considerations: per-destination status (one condition array per namespace? a subresource per destination?), conflict aggregation, propagation latency with N destinations.
-
-### 2. Cross-cluster mirroring (opt-in)
+### 1. Cross-cluster mirroring (opt-in)
 
 Federation-style. Source in cluster A, destination in cluster B. Credential distribution via a secret-backed `ClusterRef`. This is a large piece of work and will be gated behind an explicit flag and a separate CRD.
 
-### 3. OLM bundle for OperatorHub
+### 2. OLM bundle for OperatorHub
 
 Package `projection` as an OLM bundle and publish to [OperatorHub.io](https://operatorhub.io/). This is mostly packaging and metadata, not code.
 
-### 4. Kyverno-style transforms in `overlay`
+### 3. Kyverno-style transforms in `overlay`
 
 Today `overlay` only merges labels and annotations. Useful additions:
 
