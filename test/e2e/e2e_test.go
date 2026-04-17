@@ -77,6 +77,28 @@ metadata:
 `, ns))).To(Succeed())
 }
 
+// createNamespaceWithHoldFinalizer creates a namespace with a custom
+// metadata.finalizer so `kubectl delete ns` leaves it pinned in Terminating
+// state until the finalizer is released (via releaseNamespaceFinalizer).
+// Used to exercise reconcile paths that encounter a namespace in
+// Terminating state.
+func createNamespaceWithHoldFinalizer(ns, finalizer string) {
+	Expect(kubectlApply(fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+  finalizers:
+    - %s
+`, ns, finalizer))).To(Succeed())
+}
+
+// releaseNamespaceFinalizer strips all metadata.finalizers so the namespace
+// can finish terminating. Best-effort — used in DeferCleanup.
+func releaseNamespaceFinalizer(ns string) {
+	_, _ = utils.Run(exec.Command("kubectl", "patch", "namespace", ns,
+		"--type=merge", "-p", `{"metadata":{"finalizers":[]}}`))
+}
+
 func getJSONPath(path string, args ...string) string {
 	full := append([]string{"get"}, args...)
 	full = append(full, "-o", "jsonpath="+path)
@@ -613,6 +635,147 @@ spec:
 			out, _ := utils.Run(exec.Command("kubectl", "get", "projection", projName,
 				"-n", srcNS, "--ignore-not-found=true", "-o", "name"))
 			Expect(strings.TrimSpace(string(out))).To(BeEmpty())
+		})
+	})
+
+	Context("Source namespace terminating", func() {
+		It("does not break reconcile while the source still exists in a Terminating namespace", func() {
+			id := nextID()
+			srcNS := "e2e-src-term-" + id
+			dstNS := "e2e-dst-" + id
+			projName := "p-srcterm-" + id
+			cmName := "payload-" + id
+			finalizer := "e2e.projection.be0x74a.io/hold-" + id
+
+			createNamespaceWithHoldFinalizer(srcNS, finalizer)
+			createNamespace(dstNS)
+			DeferCleanup(func() {
+				releaseNamespaceFinalizer(srcNS)
+				kubectlDelete("ns", srcNS)
+				kubectlDelete("ns", dstNS)
+			})
+
+			By("creating the source ConfigMap and the Projection (both in a Terminating-eligible ns)")
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
+data:
+  k: v
+`, cmName, srcNS))).To(Succeed())
+
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: %s
+    namespace: %s
+  destination:
+    namespace: %s
+`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+
+			By("waiting for the initial projection to succeed")
+			Eventually(func() string {
+				return getJSONPath("{.metadata.name}", "cm", cmName, "-n", dstNS)
+			}, defaultEventually, defaultTick).Should(Equal(cmName))
+
+			By("waiting for Ready=True before putting the source ns into Terminating (avoids racing the controller's status patch)")
+			Eventually(func() string {
+				return getJSONPath(
+					`{.status.conditions[?(@.type=="Ready")].status}`,
+					"projection", projName, "-n", srcNS)
+			}, defaultEventually, defaultTick).Should(Equal("True"))
+
+			By("deleting the source namespace — it will stick in Terminating due to the finalizer")
+			_, _ = utils.Run(exec.Command("kubectl", "delete", "namespace", srcNS,
+				"--wait=false"))
+
+			By("Projection stays Ready=True while the source is still Get-able (reconcile isn't confused by Terminating ns)")
+			Consistently(func() string {
+				return getJSONPath(
+					`{.status.conditions[?(@.type=="Ready")].status}`,
+					"projection", projName, "-n", srcNS)
+			}, 3*time.Second, 500*time.Millisecond).Should(Equal("True"))
+		})
+	})
+
+	Context("Destination namespace terminating", func() {
+		It("surfaces DestinationWritten=False reason=DestinationCreateFailed without busy-looping", func() {
+			id := nextID()
+			srcNS := "e2e-src-" + id
+			dstNS := "e2e-dst-term-" + id
+			projName := "p-dstterm-" + id
+			cmName := "payload-" + id
+			finalizer := "e2e.projection.be0x74a.io/hold-" + id
+
+			createNamespace(srcNS)
+			createNamespaceWithHoldFinalizer(dstNS, finalizer)
+			DeferCleanup(func() {
+				releaseNamespaceFinalizer(dstNS)
+				kubectlDelete("ns", srcNS)
+				kubectlDelete("ns", dstNS)
+			})
+
+			By("putting the destination namespace into Terminating state before the Projection runs")
+			_, _ = utils.Run(exec.Command("kubectl", "delete", "namespace", dstNS,
+				"--wait=false"))
+
+			By("creating the source and Projection pointing at the Terminating destination ns")
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: %s
+  annotations:
+    projection.be0x74a.io/projectable: "true"
+data:
+  k: v
+`, cmName, srcNS))).To(Succeed())
+
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  source:
+    apiVersion: v1
+    kind: ConfigMap
+    name: %s
+    namespace: %s
+  destination:
+    namespace: %s
+`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+
+			By("Projection reports DestinationWritten=False reason=DestinationCreateFailed")
+			Eventually(func(g Gomega) {
+				status := getJSONPath(
+					`{.status.conditions[?(@.type=="DestinationWritten")].status}`,
+					"projection", projName, "-n", srcNS)
+				reason := getJSONPath(
+					`{.status.conditions[?(@.type=="DestinationWritten")].reason}`,
+					"projection", projName, "-n", srcNS)
+				g.Expect(status).To(Equal("False"))
+				g.Expect(reason).To(Equal("DestinationCreateFailed"))
+			}, defaultEventually, defaultTick).Should(Succeed())
+
+			By("no tight loop — we don't see hundreds of events for this Projection in a short window")
+			Consistently(func() int {
+				out, _ := utils.Run(exec.Command("kubectl", "get", "events",
+					"-n", srcNS,
+					"--field-selector", fmt.Sprintf("involvedObject.name=%s,type=Warning", projName),
+					"-o", "jsonpath={.items[*].reason}"))
+				return len(strings.Fields(string(out)))
+			}, 2*time.Second, 500*time.Millisecond).Should(BeNumerically("<", 50),
+				"destination-ns-terminating path emitted an unreasonable number of events; possible busy-loop")
 		})
 	})
 })
