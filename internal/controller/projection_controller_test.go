@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -64,14 +64,14 @@ func newReconciler() *ProjectionReconciler {
 		Scheme:        k8sClient.Scheme(),
 		DynamicClient: dynClient,
 		RESTMapper:    mapper,
-		Recorder:      record.NewFakeRecorder(16),
+		Recorder:      events.NewFakeRecorder(16),
 	}
 }
 
 // drainEvents pulls every event currently buffered on the FakeRecorder's
-// channel. FakeRecorder encodes each event as "<type> <reason> <message>".
+// channel. FakeRecorder encodes each event as "<type> <reason> <note>".
 func drainEvents(r *ProjectionReconciler) []string {
-	fake, ok := r.Recorder.(*record.FakeRecorder)
+	fake, ok := r.Recorder.(*events.FakeRecorder)
 	if !ok {
 		return nil
 	}
@@ -86,22 +86,13 @@ func drainEvents(r *ProjectionReconciler) []string {
 	}
 }
 
-// reconcileUntilSteady runs Reconcile repeatedly (up to `max` times) on the
-// given key. The first call adds the finalizer and requeues; subsequent calls
-// do the real work. We stop once the result no longer has Requeue=true.
-func reconcileUntilSteady(r *ProjectionReconciler, key types.NamespacedName, max int) reconcile.Result {
-	var res reconcile.Result
-	for i := 0; i < max; i++ {
-		var err error
-		res, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-		Expect(err).NotTo(HaveOccurred())
-		if !res.Requeue { //nolint:staticcheck // SA1019: reconcile.Result.Requeue is deprecated but still surfaced by the reconciler's finalizer-add path; migration deferred with the EventRecorder change.
-			// One more pass is never wrong, but we need at least two: finalizer
-			// add (requeues) + real work. After real work, Requeue is false and
-			// RequeueAfter is set, so we stop.
-			return res
-		}
-	}
+// reconcileUntilSteady runs Reconcile once. Historically it looped to absorb
+// the finalizer-add requeue; the controller now adds the finalizer and does
+// the real work in a single pass, so one call is sufficient. The unused
+// parameter is kept so existing call sites don't have to change.
+func reconcileUntilSteady(r *ProjectionReconciler, key types.NamespacedName, _ int) reconcile.Result {
+	res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+	Expect(err).NotTo(HaveOccurred())
 	return res
 }
 
