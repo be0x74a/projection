@@ -86,11 +86,10 @@ func drainEvents(r *ProjectionReconciler) []string {
 	}
 }
 
-// reconcileUntilSteady runs Reconcile once. Historically it looped to absorb
-// the finalizer-add requeue; the controller now adds the finalizer and does
-// the real work in a single pass, so one call is sufficient. The unused
-// parameter is kept so existing call sites don't have to change.
-func reconcileUntilSteady(r *ProjectionReconciler, key types.NamespacedName, _ int) reconcile.Result {
+// reconcileOnce runs Reconcile exactly once against the given key. The
+// controller does finalizer-add + real work in a single pass, so tests no
+// longer need to loop.
+func reconcileOnce(r *ProjectionReconciler, key types.NamespacedName) reconcile.Result {
 	res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 	Expect(err).NotTo(HaveOccurred())
 	return res
@@ -183,7 +182,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 
 		It("projects the source to the destination with overlay applied", func() {
 			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(resultSuccess))
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(resultSuccess))-before).
 				To(BeNumerically(">=", 1), "success counter should have incremented")
 
@@ -220,7 +219,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("updates the destination when the source changes", func() {
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			src := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sourceCMName, Namespace: sourceNS}, src)).To(Succeed())
@@ -310,7 +309,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 
 		It("sets Ready=False with reason DestinationConflict and leaves the stranger untouched", func() {
 			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(resultConflict))
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(resultConflict))-before).
 				To(BeNumerically(">=", 1), "conflict counter should have incremented")
 
@@ -390,7 +389,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			// Destination was created and owned.
 			dst := &corev1.ConfigMap{}
@@ -429,7 +428,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			// Strip the ownership annotation so the controller no longer
 			// recognises the destination as ours.
@@ -491,7 +490,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 			DeferCleanup(func() { deleteProjection(projKey) })
 
 			// Reconciler defaults to allowlist (empty SourceMode).
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			// Projection surfaces SourceResolved=False with SourceNotProjectable reason.
 			var got projectionv1.Projection
@@ -537,7 +536,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 
 			// Run in permissive mode to prove the opt-out veto still fires.
 			r.SourceMode = SourceModePermissive
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			dstKey := types.NamespacedName{Name: "mirrored-cm", Namespace: ns}
 			Expect(k8sClient.Get(ctx, dstKey, &corev1.ConfigMap{})).To(Succeed(),
@@ -628,7 +627,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("projects the source to all matching namespaces and none to non-matching", func() {
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			for _, ns := range []string{matchNS1, matchNS2, matchNS3} {
 				dst := &corev1.ConfigMap{}
@@ -710,7 +709,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("picks up a newly-labeled namespace on re-reconcile", func() {
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			// Verify initial 2 destinations.
 			for _, ns := range []string{matchNS1, matchNS2} {
@@ -789,7 +788,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("deletes the destination in a de-labeled namespace on re-reconcile", func() {
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			// All 3 destinations exist.
 			for _, ns := range []string{matchNS1, matchNS2, matchNS3} {
@@ -876,7 +875,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("removes all destinations when the Projection is deleted", func() {
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			// All 3 destinations exist.
 			for _, ns := range []string{matchNS1, matchNS2, matchNS3} {
@@ -977,7 +976,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("succeeds in non-conflicting namespaces but reports Ready=False due to the conflict", func() {
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			// The two OK namespaces should have owned destinations.
 			for _, ns := range []string{okNS1, okNS2} {
@@ -1037,7 +1036,7 @@ var _ = Describe("Projection Controller (integration)", func() {
 			projKey := types.NamespacedName{Name: proj.Name, Namespace: proj.Namespace}
 			DeferCleanup(func() { deleteProjection(projKey) })
 
-			reconcileUntilSteady(r, projKey, 5)
+			reconcileOnce(r, projKey)
 
 			var got projectionv1.Projection
 			Expect(k8sClient.Get(ctx, projKey, &got)).To(Succeed())

@@ -172,8 +172,9 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Enforced here rather than via CEL because older apiserver CEL versions
 	// (k8s 1.31-) fail to resolve self.namespace for optional string fields.
 	if proj.Spec.Destination.Namespace != "" && proj.Spec.Destination.NamespaceSelector != nil {
-		return r.failDestination(ctx, proj, "InvalidSpec", "Validate",
-			"destination.namespace and destination.namespaceSelector are mutually exclusive")
+		msg := "destination.namespace and destination.namespaceSelector are mutually exclusive"
+		r.emit(proj, corev1.EventTypeWarning, "InvalidSpec", "Validate", msg)
+		return r.failDestination(ctx, proj, "InvalidSpec", msg)
 	}
 
 	gvr, err := r.resolveGVR(proj.Spec.Source)
@@ -214,13 +215,13 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Resolve destination namespace(s).
 	destNamespaces, err := r.resolveDestinationNamespaces(ctx, proj)
 	if err != nil {
-		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", "Resolve", err.Error())
+		r.emit(proj, corev1.EventTypeWarning, "NamespaceResolutionFailed", "Resolve", err.Error())
+		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", err.Error())
 	}
 
 	type nsFailure struct {
 		namespace string
 		reason    string
-		action    string
 		message   string
 	}
 	var failures []nsFailure
@@ -237,7 +238,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if createErr := r.Create(ctx, dst); createErr != nil {
 				r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create",
 					fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
-				failures = append(failures, nsFailure{targetNS, "DestinationCreateFailed", "Create", createErr.Error()})
+				failures = append(failures, nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()})
 				continue
 			}
 			r.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
@@ -248,14 +249,14 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		case fetchErr != nil:
 			r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get",
 				fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
-			failures = append(failures, nsFailure{targetNS, "DestinationFetchFailed", "Get", fetchErr.Error()})
+			failures = append(failures, nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()})
 			continue
 		default:
 			if !isOwnedBy(existing, proj) {
 				msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
 					key.Namespace, key.Name)
 				r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", "Validate", msg)
-				failures = append(failures, nsFailure{targetNS, "DestinationConflict", "Validate", msg})
+				failures = append(failures, nsFailure{targetNS, "DestinationConflict", msg})
 				continue
 			}
 			// Carry over fields the apiserver allocated on create (clusterIP,
@@ -273,7 +274,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if updateErr := r.Update(ctx, dst); updateErr != nil {
 				r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update",
 					fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
-				failures = append(failures, nsFailure{targetNS, "DestinationUpdateFailed", "Update", updateErr.Error()})
+				failures = append(failures, nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()})
 				continue
 			}
 			r.emit(proj, corev1.EventTypeNormal, "Updated", "Update",
@@ -294,15 +295,14 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if len(failures) > 0 {
 		// Pick the most specific failure reason. If all failures share the
 		// same reason (e.g. DestinationConflict), use that; otherwise use a
-		// generic rollup reason. The action follows the reason: if the
-		// reason is uniform we carry the per-failure action; otherwise the
-		// rollup action is the generic "Write" verb.
+		// generic rollup reason. No event is emitted here — the inline
+		// per-namespace emits in the loop above already surfaced each
+		// failure with the right action. failDestination only updates
+		// status/conditions/metrics and schedules the requeue.
 		reason := failures[0].reason
-		action := failures[0].action
 		for _, f := range failures[1:] {
 			if f.reason != reason {
 				reason = "DestinationWriteFailed"
-				action = "Write"
 				break
 			}
 		}
@@ -314,7 +314,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if len(failures) > 1 {
 			msg = fmt.Sprintf("failed namespaces: %s", strings.Join(nsList, ", "))
 		}
-		return r.failDestination(ctx, proj, reason, action, msg)
+		return r.failDestination(ctx, proj, reason, msg)
 	}
 
 	if err := r.markAllReady(ctx, proj); err != nil {
@@ -696,12 +696,15 @@ func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv
 // failDestination records a failure that happened during the write stage. By
 // the time we get here we've already fetched the source, so SourceResolved is
 // True; DestinationWritten flips to False. Ready mirrors the destination-side
-// reason.
-func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, reason, action, msg string) (ctrl.Result, error) {
+// reason. Callers are responsible for emitting the event — failDestination
+// only touches status, conditions, and metrics. This keeps the rollup path
+// (which has already fired per-namespace events in the fan-out loop) from
+// double-emitting, which the client-go events broadcaster would otherwise
+// aggregate into a record that drops the action field.
+func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, reason, msg string) (ctrl.Result, error) {
 	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", "")
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionFalse, reason, msg)
 	setCondition(proj, conditionReady, metav1.ConditionFalse, reason, msg)
-	r.emit(proj, corev1.EventTypeWarning, reason, action, msg)
 	switch reason {
 	case "DestinationConflict":
 		reconcileTotal.WithLabelValues(resultConflict).Inc()

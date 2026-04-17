@@ -89,14 +89,6 @@ kubectl -n <ns> get events.events.k8s.io \
   --sort-by=.lastTimestamp
 ```
 
-Most clusters still serve the legacy `core/v1` Events endpoint; if your kubectl context is older, the same query reads as:
-
-```bash
-kubectl -n <ns> get events \
-  --field-selector involvedObject.name=<projection-name>,involvedObject.kind=Projection \
-  --sort-by=.lastTimestamp
-```
-
 All Warnings cluster-wide (use this in an on-call runbook):
 
 ```bash
