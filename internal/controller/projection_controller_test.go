@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -564,6 +565,35 @@ var _ = Describe("Projection Controller (integration)", func() {
 				HaveField("Status", Equal(metav1.ConditionFalse)),
 				HaveField("Reason", Equal("SourceOptedOut")),
 			)))
+		})
+	})
+
+	Context("Requeue-interval plumbing", func() {
+		It("returns the configured RequeueInterval when reconciliation fails fast", func() {
+			ns := uniqueNS("mirror-requeue-interval")
+			ensureNamespace(ns)
+
+			// Projection pointing at a nonexistent source — will fail in
+			// failSource, which returns ctrl.Result{RequeueAfter: r.RequeueInterval}.
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: "p-requeue", Namespace: ns},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: "does-not-exist", Namespace: ns,
+					},
+					Destination: projectionv1.DestinationRef{Namespace: ns},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			DeferCleanup(deleteProjection, types.NamespacedName{Name: "p-requeue", Namespace: ns})
+
+			r := newReconciler()
+			r.RequeueInterval = 7 * time.Second
+
+			res := reconcileOnce(r, types.NamespacedName{Name: "p-requeue", Namespace: ns})
+			Expect(res.RequeueAfter).To(Equal(7*time.Second),
+				"configured RequeueInterval must flow into the Reconcile result")
 		})
 	})
 
