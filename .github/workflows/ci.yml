@@ -75,6 +75,17 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        install:
+          - kustomize
+          - helm
+        include:
+          - install: kustomize
+            deployment_name: projection-controller-manager
+          - install: helm
+            deployment_name: projection
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -92,13 +103,26 @@ jobs:
         run: make docker-build IMG=projection:dev
       - name: Load image into Kind
         run: kind load docker-image projection:dev --name projection-e2e
-      - name: Install CRDs
+      - name: Install CRDs (Kustomize)
+        if: matrix.install == 'kustomize'
         run: make install
-      - name: Deploy operator
+      - name: Deploy operator (Kustomize)
+        if: matrix.install == 'kustomize'
         run: make deploy IMG=projection:dev
+      - name: Install Helm
+        if: matrix.install == 'helm'
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Install operator (Helm)
+        if: matrix.install == 'helm'
+        run: |
+          helm install projection charts/projection \
+            --namespace projection-system --create-namespace \
+            --set image.repository=projection \
+            --set image.tag=dev \
+            --set image.pullPolicy=Never
       - name: Wait for operator Deployment to be Ready
         run: |
-          kubectl -n projection-system rollout status deploy/projection-controller-manager --timeout=180s
+          kubectl -n projection-system rollout status deploy/${{ matrix.deployment_name }} --timeout=180s
       - name: Run e2e tests
         run: make test-e2e
       - name: Collect operator logs
@@ -107,12 +131,12 @@ jobs:
           mkdir -p e2e-logs
           kubectl -n projection-system get pods -o wide > e2e-logs/pods.txt || true
           kubectl -n projection-system describe pods > e2e-logs/describe.txt || true
-          kubectl -n projection-system logs deploy/projection-controller-manager --all-containers=true --tail=-1 > e2e-logs/controller.log || true
+          kubectl -n projection-system logs deploy/${{ matrix.deployment_name }} --all-containers=true --tail=-1 > e2e-logs/controller.log || true
       - name: Upload operator logs
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-logs
+          name: e2e-logs-${{ matrix.install }}
           path: e2e-logs
           if-no-files-found: ignore
 
