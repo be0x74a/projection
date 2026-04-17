@@ -31,6 +31,15 @@ tests:
       - equal:
           path: spec.namespaceSelector.matchNames[0]
           value: NAMESPACE
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 30s
+      - equal:
+          path: spec.endpoints[0].scrapeTimeout
+          value: 10s
+      - equal:
+          path: spec.endpoints[0].tlsConfig.insecureSkipVerify
+          value: true
 
   - it: renders no NetworkPolicy by default
     template: networkpolicy.yaml
@@ -54,6 +63,14 @@ tests:
           content:
             protocol: UDP
             port: 53
+      - contains:
+          path: spec.egress[0].ports
+          content:
+            protocol: TCP
+            port: 443
+      - equal:
+          path: spec.egress[0].to[0].ipBlock.cidr
+          value: 0.0.0.0/0
 
   - it: renders no PodDisruptionBudget by default
     template: poddisruptionbudget.yaml
