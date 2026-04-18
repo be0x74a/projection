@@ -1395,5 +1395,27 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 	})
 })
 
+var _ = Describe("watchedGvks metric", func() {
+	It("reflects the distinct-GVK count of the watched map", func() {
+		// Reset the gauge for hermetic testing. The metric is module-level,
+		// so we read-modify-write.
+		watchedGvks.Set(0)
+
+		r := &ProjectionReconciler{
+			watched: map[schema.GroupVersionKind]bool{},
+		}
+		// Simulate two ensureWatch calls for different GVKs, then a duplicate.
+		r.watchedMu.Lock()
+		r.watched[schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}] = true
+		watchedGvks.Inc()
+		r.watched[schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"}] = true
+		watchedGvks.Inc()
+		// Duplicate: ensureWatch short-circuits before Inc, so no Inc here.
+		r.watchedMu.Unlock()
+
+		Expect(testutil.ToFloat64(watchedGvks)).To(Equal(2.0))
+	})
+})
+
 // Silence unused-import warnings when the file is edited in isolation.
 var _ = client.Object(&corev1.ConfigMap{})
