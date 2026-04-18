@@ -33,6 +33,36 @@ kubectl -n projection-system get pods
 
 You should see one `Running` controller pod. If it's `CrashLoopBackOff`, jump to [Troubleshooting](#troubleshooting).
 
+## Source opt-in
+
+`projection` ships with `--source-mode=allowlist` as the default. That means a
+source object must carry the annotation `projection.be0x74a.io/projectable:
+"true"` to be mirrored. Without it, the `Projection` status reports
+`SourceResolved=False reason=SourceNotProjectable` and no destination is
+written.
+
+Annotate the source you want to mirror:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+  annotations:
+    projection.be0x74a.io/projectable: "true"
+```
+
+The value `"false"` is always honored as a source-owner veto — in any mode,
+including `permissive`. If you can't annotate your sources (for example, when
+mirroring third-party CRs), flip the operator to
+`--source-mode=permissive` (Helm value `sourceMode: permissive`) and any
+source is projectable unless explicitly vetoed.
+
+The canonical example at `examples/configmap-cross-namespace.yaml` already
+carries the annotation — you don't need to edit anything to follow the next
+section.
+
 ## Your first Projection
 
 Apply the canonical ConfigMap-across-namespaces example:
