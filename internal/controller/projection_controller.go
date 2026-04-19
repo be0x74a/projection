@@ -389,6 +389,7 @@ func (r *ProjectionReconciler) ensureWatch(gvk schema.GroupVersionKind) error {
 		return err
 	}
 	r.watched[gvk] = true
+	watchedGvks.Inc()
 	return nil
 }
 
