@@ -53,7 +53,7 @@ func TestReportText(t *testing.T) {
 		t.Fatalf("WriteText: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"small", "100", "p50", "p95"} {
+	for _, want := range []string{"small", "100", "p50", "p95", "controller_rss_mb", "controller_cpu_seconds_delta"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text output missing %q:\n%s", want, out)
 		}

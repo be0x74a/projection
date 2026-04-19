@@ -68,6 +68,8 @@ func (r *Report) WriteText(w io.Writer) error {
 	}
 	fmt.Fprintf(tw, "watched_gvks\t%.0f\n", r.Measurements.WatchedGVKs)
 	fmt.Fprintf(tw, "controller_heap_mb\t%.1f\n", r.Measurements.ControllerHeapMB)
+	fmt.Fprintf(tw, "controller_rss_mb\t%.1f\n", r.Measurements.ControllerRSSMB)
+	fmt.Fprintf(tw, "controller_cpu_seconds_delta\t%.2f\n", r.Measurements.ControllerCPUDelta)
 	fmt.Fprintf(tw, "reconcile_p50_ms\t%.2f\n", r.Measurements.ReconcileP50Ms)
 	fmt.Fprintf(tw, "reconcile_p95_ms\t%.2f\n", r.Measurements.ReconcileP95Ms)
 	fmt.Fprintf(tw, "reconcile_p99_ms\t%.2f\n", r.Measurements.ReconcileP99Ms)
