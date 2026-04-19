@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -136,6 +137,34 @@ func sourceKey(apiVersion, kind, namespace, name string) string {
 	return apiVersion + "/" + kind + "/" + namespace + "/" + name
 }
 
+// benchStampAnnotation is the annotation the projection benchmark harness
+// writes on source objects to measure end-to-end propagation latency. Value
+// is a unix-nano timestamp. Presence of the annotation triggers a per-phase
+// latency log line in Reconcile; absence makes this a no-op in production.
+const benchStampAnnotation = "bench.projection.be0x74a.io/stamp"
+
+// logBenchStampLatency, when the source carries the benchmark harness's
+// stamp annotation, logs the wall-clock delta from stamp issuance at the
+// named reconcile phase. Used only by the bench harness to decompose the
+// observed e2e latency floor. No-op when the annotation is absent.
+func logBenchStampLatency(ctx context.Context, source *unstructured.Unstructured, phase string) {
+	v := source.GetAnnotations()[benchStampAnnotation]
+	if v == "" {
+		return
+	}
+	nanos, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return
+	}
+	delta := time.Since(time.Unix(0, nanos))
+	log.FromContext(ctx).Info("bench stamp latency",
+		"phase", phase,
+		"delta_ms", delta.Milliseconds(),
+		"name", source.GetName(),
+		"namespace", source.GetNamespace(),
+	)
+}
+
 // +kubebuilder:rbac:groups=projection.be0x74a.io,resources=projections,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=projection.be0x74a.io,resources=projections/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=projection.be0x74a.io,resources=projections/finalizers,verbs=update
@@ -204,6 +233,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		return r.handleSourceFetchError(ctx, proj, gvr, err)
 	}
+	logBenchStampLatency(ctx, source, "source-fetched")
 
 	// Opt-in / opt-out policy. If the source says it's not projectable (or
 	// didn't opt in under allowlist mode), clean up any destination we
@@ -326,6 +356,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.markAllReady(ctx, proj); err != nil {
 		return ctrl.Result{}, err
 	}
+	logBenchStampLatency(ctx, source, "reconcile-end")
 
 	// No periodic requeue: the dynamic source watch registered above is
 	// authoritative for propagating future source edits.
