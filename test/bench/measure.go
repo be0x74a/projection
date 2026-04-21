@@ -126,7 +126,7 @@ func scrapeController(ctx context.Context, url string) (MetricsSnapshot, error) 
 	if err != nil {
 		return MetricsSnapshot{}, fmt.Errorf("scraping %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return MetricsSnapshot{}, fmt.Errorf("scraping %s: status %d", url, resp.StatusCode)
 	}
@@ -195,7 +195,7 @@ func waitForStamp(ctx context.Context, c *clients, gvkIdx int, dstNs, name, stam
 // measureE2ESingle stamps each sample source and polls its single destination
 // namespace. Returns one latency distribution. Used for non-selector profiles.
 func measureE2ESingle(ctx context.Context, c *clients, sample []projectionRef) (LatencyResult, error) {
-	var durations []time.Duration
+	durations := make([]time.Duration, 0, len(sample))
 	for _, ref := range sample {
 		stamp, t0, err := stampSource(ctx, c, ref)
 		if err != nil {

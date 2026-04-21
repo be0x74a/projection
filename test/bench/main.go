@@ -32,7 +32,7 @@ func main() {
 	}
 
 	if err := run(*profileName, *kubeconfig, *allowDefault, *output, *metricsURL, overrides); err != nil {
-		fmt.Fprintf(os.Stderr, "bench: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "bench: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -66,9 +66,9 @@ func run(profileName, kubeconfig string, allowDefault bool, output, metricsURL s
 		profiles = []Profile{p}
 	}
 
-	var reports []*Report
+	reports := make([]*Report, 0, len(profiles))
 	for _, p := range profiles {
-		fmt.Fprintf(os.Stderr, "=> running profile %q\n", p.Name)
+		_, _ = fmt.Fprintf(os.Stderr, "=> running profile %q\n", p.Name)
 		r, err := runProfile(ctx, c, p, metricsURL)
 		if err != nil {
 			return fmt.Errorf("profile %s: %w", p.Name, err)

@@ -37,6 +37,14 @@ func buildClients(kubeconfig string) (*clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading kubeconfig %q: %w", kubeconfig, err)
 	}
+	// client-go defaults to QPS=5, Burst=10 when unset, which throttles the
+	// harness's own observation loop: each sample consumes 2 tokens (one
+	// PATCH, one Get), steady state is 400ms/sample, and it shows up in
+	// e2e_p50/p95/p99 as a spurious ~400ms floor. Setting these high enough
+	// that the harness never throttles itself — we're a local diagnostic
+	// tool, not a production client.
+	cfg.QPS = 500
+	cfg.Burst = 1000
 	kube, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("building kube client: %w", err)

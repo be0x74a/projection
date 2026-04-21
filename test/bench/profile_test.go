@@ -6,13 +6,13 @@ import (
 
 func TestParseProfile_Named(t *testing.T) {
 	tests := []struct {
-		name       string
-		profile    string
-		wantProjs  int
-		wantGVKs   int
-		wantNs     int
-		wantSelNs  int
-		wantErr    bool
+		name      string
+		profile   string
+		wantProjs int
+		wantGVKs  int
+		wantNs    int
+		wantSelNs int
+		wantErr   bool
 	}{
 		{"small", "small", 100, 10, 10, 0, false},
 		{"medium", "medium", 1000, 20, 50, 0, false},

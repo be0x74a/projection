@@ -16,6 +16,13 @@ issues:
       linters:
         - dupl
         - lll
+    # Bench harness is test/diagnostic code: long function signatures with
+    # many parameters are natural, and duplicated boilerplate between
+    # client-go calls is expected. Same treatment as internal/*.
+    - path: "test/bench/*"
+      linters:
+        - dupl
+        - lll
     # Test code routinely has high cyclomatic complexity (table-driven tests),
     # parameters that always receive the same value (test fixtures), and
     # repeated structures. Don't fail CI on those patterns in *_test.go.

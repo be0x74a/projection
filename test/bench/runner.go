@@ -94,7 +94,7 @@ func writeReports(w io.Writer, format string, reports []*Report) error {
 				return err
 			}
 		case "text":
-			fmt.Fprintf(w, "\n=== %s ===\n", r.Profile.Name)
+			_, _ = fmt.Fprintf(w, "\n=== %s ===\n", r.Profile.Name)
 			if err := r.WriteText(w); err != nil {
 				return err
 			}
