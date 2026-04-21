@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	dto "github.com/prometheus/client_model/go"
@@ -217,20 +218,40 @@ func measureE2ESingle(ctx context.Context, c *clients, sample []projectionRef) (
 // destination namespaces per stamp. Two independent distributions expose
 // the fan-out spread (last-ns p99 > first-ns p99 by the time it takes the
 // controller to iterate matching namespaces).
+//
+// The first-ns and last-ns polls run in parallel per stamp. Sequential
+// polling would only measure "time until harness finished polling first-ns"
+// for last-ns — by the time that completes, the controller has typically
+// written all 100 destinations, so the measured first/last spread collapses
+// to a single HTTP round-trip regardless of actual fan-out cost.
 func measureE2ESelector(ctx context.Context, c *clients, src projectionRef, firstDstNs, lastDstNs string, stamps int) (SelectorLatencyResult, error) {
-	var firstDur, lastDur []time.Duration
+	firstDur := make([]time.Duration, 0, stamps)
+	lastDur := make([]time.Duration, 0, stamps)
 	for i := 0; i < stamps; i++ {
 		stamp, t0, err := stampSource(ctx, c, src)
 		if err != nil {
 			return SelectorLatencyResult{}, fmt.Errorf("patching source %s/%s: %w", src.SrcNs, src.SrcName, err)
 		}
-		eFirst, err := waitForStamp(ctx, c, src.GVKIdx, firstDstNs, src.SrcName, stamp, t0)
-		if err != nil {
-			return SelectorLatencyResult{}, fmt.Errorf("first-ns %s: %w", firstDstNs, err)
+		var (
+			eFirst, eLast     time.Duration
+			firstErr, lastErr error
+			wg                sync.WaitGroup
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			eFirst, firstErr = waitForStamp(ctx, c, src.GVKIdx, firstDstNs, src.SrcName, stamp, t0)
+		}()
+		go func() {
+			defer wg.Done()
+			eLast, lastErr = waitForStamp(ctx, c, src.GVKIdx, lastDstNs, src.SrcName, stamp, t0)
+		}()
+		wg.Wait()
+		if firstErr != nil {
+			return SelectorLatencyResult{}, fmt.Errorf("first-ns %s: %w", firstDstNs, firstErr)
 		}
-		eLast, err := waitForStamp(ctx, c, src.GVKIdx, lastDstNs, src.SrcName, stamp, t0)
-		if err != nil {
-			return SelectorLatencyResult{}, fmt.Errorf("last-ns %s: %w", lastDstNs, err)
+		if lastErr != nil {
+			return SelectorLatencyResult{}, fmt.Errorf("last-ns %s: %w", lastDstNs, lastErr)
 		}
 		firstDur = append(firstDur, eFirst)
 		lastDur = append(lastDur, eLast)
