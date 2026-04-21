@@ -39,16 +39,18 @@ type Measurements struct {
 	E2EP95     time.Duration `json:"e2e_p95_ns,omitempty"`
 	E2EP99     time.Duration `json:"e2e_p99_ns,omitempty"`
 
-	// Selector profiles only: two distributions, one for the first-listed
-	// destination namespace and one for the last-listed. The spread between
-	// First and Last exposes fan-out cost. Zero for non-selector profiles.
-	E2EFirstNsSamples int           `json:"e2e_first_ns_samples,omitempty"`
-	E2EFirstNsP50     time.Duration `json:"e2e_first_ns_p50_ns,omitempty"`
-	E2EFirstNsP95     time.Duration `json:"e2e_first_ns_p95_ns,omitempty"`
-	E2EFirstNsP99     time.Duration `json:"e2e_first_ns_p99_ns,omitempty"`
-	E2ELastNsP50      time.Duration `json:"e2e_last_ns_p50_ns,omitempty"`
-	E2ELastNsP95      time.Duration `json:"e2e_last_ns_p95_ns,omitempty"`
-	E2ELastNsP99      time.Duration `json:"e2e_last_ns_p99_ns,omitempty"`
+	// Selector profiles only: two paired distributions per stamp, captured
+	// by a List-driven poll over the full matched-destination set. Earliest
+	// is the time to the first destination catching the new stamp; Slowest
+	// is the time to the last destination catching it. The spread exposes
+	// fan-out cost. Zero for non-selector profiles.
+	E2EFanoutSamples int           `json:"e2e_fanout_samples,omitempty"`
+	E2EEarliestP50   time.Duration `json:"e2e_earliest_p50_ns,omitempty"`
+	E2EEarliestP95   time.Duration `json:"e2e_earliest_p95_ns,omitempty"`
+	E2EEarliestP99   time.Duration `json:"e2e_earliest_p99_ns,omitempty"`
+	E2ESlowestP50    time.Duration `json:"e2e_slowest_p50_ns,omitempty"`
+	E2ESlowestP95    time.Duration `json:"e2e_slowest_p95_ns,omitempty"`
+	E2ESlowestP99    time.Duration `json:"e2e_slowest_p99_ns,omitempty"`
 }
 
 func (r *Report) WriteJSON(w io.Writer) error {
@@ -80,12 +82,12 @@ func (r *Report) WriteText(w io.Writer) error {
 	row("reconcile_p95_ms\t%.2f\n", r.Measurements.ReconcileP95Ms)
 	row("reconcile_p99_ms\t%.2f\n", r.Measurements.ReconcileP99Ms)
 	if r.Profile.SelectorNamespaces > 0 {
-		row("e2e_first_ns_p50\t%s\n", r.Measurements.E2EFirstNsP50)
-		row("e2e_first_ns_p95\t%s\n", r.Measurements.E2EFirstNsP95)
-		row("e2e_first_ns_p99\t%s\n", r.Measurements.E2EFirstNsP99)
-		row("e2e_last_ns_p50\t%s\n", r.Measurements.E2ELastNsP50)
-		row("e2e_last_ns_p95\t%s\n", r.Measurements.E2ELastNsP95)
-		row("e2e_last_ns_p99\t%s\n", r.Measurements.E2ELastNsP99)
+		row("e2e_earliest_p50\t%s\n", r.Measurements.E2EEarliestP50)
+		row("e2e_earliest_p95\t%s\n", r.Measurements.E2EEarliestP95)
+		row("e2e_earliest_p99\t%s\n", r.Measurements.E2EEarliestP99)
+		row("e2e_slowest_p50\t%s\n", r.Measurements.E2ESlowestP50)
+		row("e2e_slowest_p95\t%s\n", r.Measurements.E2ESlowestP95)
+		row("e2e_slowest_p99\t%s\n", r.Measurements.E2ESlowestP99)
 	} else {
 		row("e2e_p50\t%s\n", r.Measurements.E2EP50)
 		row("e2e_p95\t%s\n", r.Measurements.E2EP95)

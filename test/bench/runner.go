@@ -33,19 +33,19 @@ func runProfile(ctx context.Context, c *clients, p Profile, metricsURL string) (
 		return nil, fmt.Errorf("baseline scrape: %w", err)
 	}
 
-	// Measurement window. Selector profiles measure first-ns vs last-ns
-	// latency on a single source; other profiles sample across Projections.
+	// Measurement window. Selector profiles observe earliest vs slowest
+	// fan-out latency across the full matched-destination set via a
+	// List-driven poll; other profiles sample across Projections.
 	var m Measurements
 	if p.SelectorNamespaces > 0 {
 		const selectorStamps = 30
-		sel, err := measureE2ESelector(ctx, c, res.Projections[0],
-			res.DestNsList[0], res.DestNsList[len(res.DestNsList)-1], selectorStamps)
+		sel, err := measureE2ESelector(ctx, c, res.Projections[0], res.DestNsList, selectorStamps)
 		if err != nil {
 			return nil, fmt.Errorf("measure selector e2e: %w", err)
 		}
-		m.E2EFirstNsSamples = sel.Samples
-		m.E2EFirstNsP50, m.E2EFirstNsP95, m.E2EFirstNsP99 = sel.First.P50, sel.First.P95, sel.First.P99
-		m.E2ELastNsP50, m.E2ELastNsP95, m.E2ELastNsP99 = sel.Last.P50, sel.Last.P95, sel.Last.P99
+		m.E2EFanoutSamples = sel.Samples
+		m.E2EEarliestP50, m.E2EEarliestP95, m.E2EEarliestP99 = sel.Earliest.P50, sel.Earliest.P95, sel.Earliest.P99
+		m.E2ESlowestP50, m.E2ESlowestP95, m.E2ESlowestP99 = sel.Slowest.P50, sel.Slowest.P95, sel.Slowest.P99
 	} else {
 		sample := res.Projections
 		if len(sample) > 100 {

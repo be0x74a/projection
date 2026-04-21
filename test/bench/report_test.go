@@ -59,7 +59,7 @@ func TestReportText(t *testing.T) {
 		}
 	}
 	// Non-selector profile must NOT print selector-specific rows.
-	for _, banned := range []string{"e2e_first_ns", "e2e_last_ns"} {
+	for _, banned := range []string{"e2e_first_ns", "e2e_last_ns", "e2e_earliest", "e2e_slowest"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("text output unexpectedly includes %q for non-selector profile:\n%s", banned, out)
 		}
@@ -71,10 +71,10 @@ func TestReportText_Selector(t *testing.T) {
 		Profile: Profile{Name: "selector", Projections: 1, GVKs: 1, Namespaces: 1, SelectorNamespaces: 100},
 		Measurements: Measurements{
 			ReconcileP50Ms: 4.0,
-			E2EFirstNsP50:  40 * time.Millisecond,
-			E2EFirstNsP99:  120 * time.Millisecond,
-			E2ELastNsP50:   400 * time.Millisecond,
-			E2ELastNsP99:   950 * time.Millisecond,
+			E2EEarliestP50: 40 * time.Millisecond,
+			E2EEarliestP99: 120 * time.Millisecond,
+			E2ESlowestP50:  400 * time.Millisecond,
+			E2ESlowestP99:  950 * time.Millisecond,
 		},
 	}
 	var buf bytes.Buffer
@@ -82,9 +82,15 @@ func TestReportText_Selector(t *testing.T) {
 		t.Fatalf("WriteText: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"selector_ns", "e2e_first_ns_p50", "e2e_last_ns_p99", "100"} {
+	for _, want := range []string{"selector_ns", "e2e_earliest_p50", "e2e_slowest_p99", "100"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("selector text output missing %q:\n%s", want, out)
+		}
+	}
+	// The renamed fields must replace the old first-ns/last-ns rows entirely.
+	for _, banned := range []string{"e2e_first_ns", "e2e_last_ns"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("selector text output unexpectedly includes legacy field %q:\n%s", banned, out)
 		}
 	}
 	// Selector profile must NOT print the non-selector e2e_p50/p95/p99 rows.
