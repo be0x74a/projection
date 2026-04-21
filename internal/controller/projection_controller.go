@@ -53,6 +53,15 @@ const (
 	ownedByAnnotation     = "projection.be0x74a.io/owned-by"
 	projectableAnnotation = "projection.be0x74a.io/projectable"
 
+	// ownedByUIDLabel is a label stamped on every destination by
+	// buildDestination. Value is the owning Projection's UID. Enables
+	// cleanup paths to locate owned destinations via a single cluster-wide
+	// List(LabelSelector) instead of walking every namespace in the cluster
+	// (#33). Label values are capped at 63 chars and permit [a-z0-9-] plus
+	// dashes; Kubernetes UIDs are RFC-4122 UUIDs (36 chars), both within
+	// the label-value regex and well under the length limit.
+	ownedByUIDLabel = "projection.be0x74a.io/owned-by-uid"
+
 	conditionReady              = "Ready"
 	conditionSourceResolved     = "SourceResolved"
 	conditionDestinationWritten = "DestinationWritten"
@@ -483,47 +492,44 @@ func (r *ProjectionReconciler) deleteOneDestination(ctx context.Context, proj *p
 	return nil
 }
 
-// deleteAllOwnedDestinations scans all namespaces for destinations owned by
-// this Projection and deletes them. Used by the finalizer path for
-// selector-based Projections. O(namespaces) — runs once during deletion;
-// a full scan is necessary because the selector may have changed since
-// the last reconcile.
+// deleteAllOwnedDestinations deletes every destination owned by this
+// Projection. Used by the finalizer path for selector-based Projections,
+// where the selector may have changed since the last reconcile and we need
+// to sweep across all namespaces the Projection ever wrote to.
+//
+// Finds destinations via a single cluster-wide List on the destination GVK
+// filtered by the ownedByUIDLabel — O(owned) instead of O(all cluster
+// namespaces). The annotation is still checked as a belt-and-braces
+// ownership guard in case a stranger has manually set the label.
 func (r *ProjectionReconciler) deleteAllOwnedDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource) error {
 	ownerValue := proj.Namespace + "/" + proj.Name
-	destName := proj.Spec.Destination.Name
-	if destName == "" {
-		destName = proj.Spec.Source.Name
-	}
 
-	// List all namespaces and check each for an owned destination.
-	var nsList corev1.NamespaceList
-	if err := r.List(ctx, &nsList); err != nil {
-		return fmt.Errorf("listing namespaces for cleanup: %w", err)
+	owned, err := r.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", ownedByUIDLabel, proj.UID),
+	})
+	if err != nil {
+		return fmt.Errorf("listing owned destinations: %w", err)
 	}
 	var firstErr error
-	for i := range nsList.Items {
-		ns := nsList.Items[i].Name
-		existing, err := r.DynamicClient.Resource(gvr).Namespace(ns).Get(ctx, destName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
+	for i := range owned.Items {
+		obj := &owned.Items[i]
+		ns := obj.GetNamespace()
+		name := obj.GetName()
+		// Belt-and-braces: verify the annotation too. The label alone is
+		// enough for a cooperative system; checking the annotation protects
+		// against a malicious or buggy actor copying our label to a
+		// stranger's object and tricking the controller into deleting it.
+		if obj.GetAnnotations()[ownedByAnnotation] != ownerValue {
 			continue
 		}
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if existing.GetAnnotations()[ownedByAnnotation] != ownerValue {
-			continue
-		}
-		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, destName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
 		r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted", "Delete",
-			fmt.Sprintf("%s/%s", ns, destName))
+			fmt.Sprintf("%s/%s", ns, name))
 	}
 	return firstErr
 }
@@ -578,50 +584,44 @@ func (r *ProjectionReconciler) resolveDestinationNamespaces(ctx context.Context,
 // cleanupStaleDestinations removes destinations in namespaces that are owned
 // by this Projection but are no longer in the current resolved set. This
 // handles the case where a namespace loses a label or the selector changes.
-// O(namespaces) per call — acceptable because namespace counts are typically
-// low and this only runs for selector-based Projections.
+// O(owned destinations) per call via a single cluster-wide List filtered by
+// the ownedByUIDLabel — independent of total cluster namespace count (#33).
+// Runs only for selector-based Projections.
 func (r *ProjectionReconciler) cleanupStaleDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, currentSet map[string]bool) error {
 	// Only needed for selector-based Projections.
 	if proj.Spec.Destination.NamespaceSelector == nil {
 		return nil
 	}
 	ownerValue := proj.Namespace + "/" + proj.Name
-	destName := proj.Spec.Destination.Name
-	if destName == "" {
-		destName = proj.Spec.Source.Name
-	}
 
-	var nsList corev1.NamespaceList
-	if err := r.List(ctx, &nsList); err != nil {
-		return fmt.Errorf("listing namespaces for stale cleanup: %w", err)
+	owned, err := r.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", ownedByUIDLabel, proj.UID),
+	})
+	if err != nil {
+		return fmt.Errorf("listing owned destinations for stale cleanup: %w", err)
 	}
 	var firstErr error
-	for i := range nsList.Items {
-		ns := nsList.Items[i].Name
+	for i := range owned.Items {
+		obj := &owned.Items[i]
+		ns := obj.GetNamespace()
 		if currentSet[ns] {
 			continue // still in the resolved set, keep it
 		}
-		existing, err := r.DynamicClient.Resource(gvr).Namespace(ns).Get(ctx, destName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
+		// Belt-and-braces ownership check; see deleteAllOwnedDestinations
+		// for why the label alone isn't sufficient when the namespace is
+		// controlled by someone other than us.
+		if obj.GetAnnotations()[ownedByAnnotation] != ownerValue {
 			continue
 		}
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if existing.GetAnnotations()[ownedByAnnotation] != ownerValue {
-			continue
-		}
-		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, destName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		name := obj.GetName()
+		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
 		r.emit(proj, corev1.EventTypeNormal, "StaleDestinationDeleted", "Delete",
-			fmt.Sprintf("%s/%s", ns, destName))
+			fmt.Sprintf("%s/%s", ns, name))
 	}
 	return firstErr
 }
@@ -868,16 +868,15 @@ func buildDestination(source *unstructured.Unstructured, proj *projectionv1.Proj
 	annotations[ownedByAnnotation] = proj.Namespace + "/" + proj.Name
 	dst.SetAnnotations(annotations)
 
-	if len(proj.Spec.Overlay.Labels) > 0 {
-		lbls := dst.GetLabels()
-		if lbls == nil {
-			lbls = map[string]string{}
-		}
-		for k, v := range proj.Spec.Overlay.Labels {
-			lbls[k] = v
-		}
-		dst.SetLabels(lbls)
+	lbls := dst.GetLabels()
+	if lbls == nil {
+		lbls = map[string]string{}
 	}
+	for k, v := range proj.Spec.Overlay.Labels {
+		lbls[k] = v
+	}
+	lbls[ownedByUIDLabel] = string(proj.UID)
+	dst.SetLabels(lbls)
 
 	name := proj.Spec.Destination.Name
 	if name == "" {
