@@ -173,25 +173,6 @@ func sourceKey(apiVersion, kind, namespace, name string) string {
 // latency log line in Reconcile; absence makes this a no-op in production.
 const benchStampAnnotation = "bench.projection.be0x74a.io/stamp"
 
-// logBenchDstWrite logs the wall-clock timestamp at which a destination
-// write completed, for the two bench namespaces the selector-profile harness
-// polls. Combined with the stamp annotation (unix-nano of the harness's
-// stamp PATCH), a post-run log analysis can tell whether destination N was
-// written by the reconcile that was *triggered* by the stamp, or by an
-// earlier in-flight reconcile that happened to read the latest source
-// (answering the "why does e2e_first ≈ e2e_last" question in #33 follow-up).
-// No-op for non-bench namespaces.
-func logBenchDstWrite(ctx context.Context, source *unstructured.Unstructured, targetNS string) {
-	if targetNS != "bench-dst-sel-0" && targetNS != "bench-dst-sel-99" {
-		return
-	}
-	log.FromContext(ctx).Info("bench dst written",
-		"ns", targetNS,
-		"stamp", source.GetAnnotations()[benchStampAnnotation],
-		"t_unixnano", time.Now().UnixNano(),
-	)
-}
-
 // logBenchStampLatency, when the source carries the benchmark harness's
 // stamp annotation, logs the wall-clock delta from stamp issuance at the
 // named reconcile phase. Used only by the bench harness to decompose the
@@ -460,7 +441,6 @@ func (r *ProjectionReconciler) writeOneDestination(
 				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
 				dst.GetNamespace(), dst.GetName()))
 	}
-	logBenchDstWrite(ctx, source, targetNS)
 	return true, nil
 }
 
