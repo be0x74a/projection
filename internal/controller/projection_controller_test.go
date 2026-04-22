@@ -39,6 +39,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -1066,11 +1067,15 @@ var _ = Describe("Projection Controller (integration)", func() {
 
 	Context("Namespace and namespaceSelector mutually exclusive", func() {
 		It("reconciler rejects a Projection with both namespace and namespaceSelector set", func() {
+			// Use a fake client to bypass CEL admission (which also enforces this
+			// invariant), proving the reconciler check works as defense-in-depth.
 			ns := uniqueNS("sel-mutex")
-			ensureNamespace(ns)
-
 			proj := &projectionv1.Projection{
-				ObjectMeta: metav1.ObjectMeta{Name: "p-mutex", Namespace: ns},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "p-mutex",
+					Namespace:       ns,
+					ResourceVersion: "1",
+				},
 				Spec: projectionv1.ProjectionSpec{
 					Source: projectionv1.SourceRef{
 						APIVersion: "v1", Kind: "ConfigMap",
@@ -1084,20 +1089,60 @@ var _ = Describe("Projection Controller (integration)", func() {
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(k8sClient.Scheme()).
+				WithObjects(proj).
+				WithStatusSubresource(proj).
+				Build()
+			fakeRecorder := events.NewFakeRecorder(16)
+			fakeR := &ProjectionReconciler{
+				Client:   fakeClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: fakeRecorder,
+			}
 			projKey := types.NamespacedName{Name: proj.Name, Namespace: proj.Namespace}
-			DeferCleanup(func() { deleteProjection(projKey) })
 
-			reconcileOnce(r, projKey)
+			_, err := fakeR.Reconcile(ctx, reconcile.Request{NamespacedName: projKey})
+			Expect(err).NotTo(HaveOccurred())
 
 			var got projectionv1.Projection
-			Expect(k8sClient.Get(ctx, projKey, &got)).To(Succeed())
+			Expect(fakeClient.Get(ctx, projKey, &got)).To(Succeed())
 			Expect(got.Status.Conditions).To(ContainElement(SatisfyAll(
 				HaveField("Type", Equal(conditionDestinationWritten)),
 				HaveField("Status", Equal(metav1.ConditionFalse)),
 				HaveField("Reason", Equal("InvalidSpec")),
 				HaveField("Message", ContainSubstring("mutually exclusive")),
 			)))
+		})
+
+		It("apiserver rejects a Projection with both namespace and namespaceSelector set at admission time", func() {
+			ns := uniqueNS("sel-mutex-cel")
+			Expect(k8sClient.Create(ctx, &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: ns},
+			})).To(Succeed())
+
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: ns},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1",
+						Kind:       "ConfigMap",
+						Name:       "src",
+						Namespace:  ns,
+					},
+					Destination: projectionv1.DestinationRef{
+						Namespace: "dest-ns",
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"env": "prod"},
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, proj)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue())
+			Expect(err.Error()).To(ContainSubstring("mutually exclusive"))
 		})
 	})
 

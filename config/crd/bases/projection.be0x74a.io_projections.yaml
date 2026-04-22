@@ -122,6 +122,10 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+                x-kubernetes-validations:
+                - message: destination.namespace and destination.namespaceSelector
+                    are mutually exclusive
+                  rule: '!(has(self.namespace) && has(self.namespaceSelector))'
               overlay:
                 description: Overlay applies metadata patches on top of the projected
                   object.
