@@ -98,7 +98,7 @@ jobs:
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: projection-e2e
-          node_image: kindest/node:v1.31.0
+          node_image: kindest/node:v1.32.0
       - name: Build image
         run: make docker-build IMG=projection:dev
       - name: Load image into Kind

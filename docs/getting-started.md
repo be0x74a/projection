@@ -4,7 +4,7 @@ This walks through installing the `projection` operator and creating your first 
 
 ## Prerequisites
 
-- A Kubernetes cluster (1.25+ recommended).
+- A Kubernetes cluster (1.32+ required — the CRD uses CEL admission validation, which needs this minimum version).
 - `kubectl` configured to talk to it.
 - Cluster-admin (for the initial install — the chart creates a CRD and a ClusterRole).
 
