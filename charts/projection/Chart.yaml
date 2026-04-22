@@ -4,7 +4,7 @@ description: The Kubernetes CRD for declarative resource mirroring across namesp
 type: application
 version: 0.1.0-alpha
 appVersion: "0.1.0-alpha"
-kubeVersion: ">=1.25.0-0"
+kubeVersion: ">=1.32.0-0"
 home: https://github.com/be0x74a/projection
 sources:
   - https://github.com/be0x74a/projection

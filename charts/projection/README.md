@@ -21,7 +21,7 @@ resources across namespaces.
 
 ## Prerequisites
 
-- Kubernetes >= 1.25
+- Kubernetes >= 1.32
 - Helm >= 3.8
 - Cluster-admin permissions for the user running `helm install` (required to
   create the ClusterRole and install the CRD)
