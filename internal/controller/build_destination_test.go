@@ -38,6 +38,10 @@ func newProj(projNs, projName string, src projectionv1.SourceRef, dst projection
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      projName,
 			Namespace: projNs,
+			// Deterministic UID so buildDestination's ownedByUIDLabel
+			// comparisons are stable across test runs. In envtest and real
+			// clusters the apiserver allocates this.
+			UID: "00000000-0000-0000-0000-000000000001",
 		},
 		Spec: projectionv1.ProjectionSpec{
 			Source:      src,
@@ -191,9 +195,10 @@ func TestBuildDestination(t *testing.T) {
 			}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				wantLabels := map[string]string{
-					"a":         "overlay",
-					"b":         "new",
-					"untouched": "yes",
+					"a":             "overlay",
+					"b":             "new",
+					"untouched":     "yes",
+					ownedByUIDLabel: "00000000-0000-0000-0000-000000000001",
 				}
 				if diff := cmp.Diff(wantLabels, dst.GetLabels()); diff != "" {
 					t.Errorf("labels mismatch (-want +got):\n%s", diff)
@@ -220,7 +225,10 @@ func TestBuildDestination(t *testing.T) {
 				Annotations: map[string]string{"only": "overlay"},
 			}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
-				wantLabels := map[string]string{"only": "overlay"}
+				wantLabels := map[string]string{
+					"only":          "overlay",
+					ownedByUIDLabel: "00000000-0000-0000-0000-000000000001",
+				}
 				if diff := cmp.Diff(wantLabels, dst.GetLabels()); diff != "" {
 					t.Errorf("labels mismatch (-want +got):\n%s", diff)
 				}
@@ -244,6 +252,24 @@ func TestBuildDestination(t *testing.T) {
 				want := "proj-ns/proj-name"
 				if got != want {
 					t.Errorf("%s = %q, want %q", ownedByAnnotation, got, want)
+				}
+			},
+		},
+		{
+			// The UID label is what cleanupStaleDestinations and
+			// deleteAllOwnedDestinations filter on; without it those paths
+			// fall back to an O(all namespaces) scan. Guard against
+			// accidental removal (#33).
+			name: "ownership UID label stamped",
+			source: func() *unstructured.Unstructured {
+				return newSourceCM("src-cm", "src-ns")
+			},
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
+				got := dst.GetLabels()[ownedByUIDLabel]
+				want := "00000000-0000-0000-0000-000000000001"
+				if got != want {
+					t.Errorf("%s = %q, want %q", ownedByUIDLabel, got, want)
 				}
 			},
 		},

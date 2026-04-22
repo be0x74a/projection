@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,15 @@ const (
 	ownedByAnnotation     = "projection.be0x74a.io/owned-by"
 	projectableAnnotation = "projection.be0x74a.io/projectable"
 
+	// ownedByUIDLabel is a label stamped on every destination by
+	// buildDestination. Value is the owning Projection's UID. Enables
+	// cleanup paths to locate owned destinations via a single cluster-wide
+	// List(LabelSelector) instead of walking every namespace in the cluster
+	// (#33). Label values are capped at 63 chars and permit [a-z0-9-] plus
+	// dashes; Kubernetes UIDs are RFC-4122 UUIDs (36 chars), both within
+	// the label-value regex and well under the length limit.
+	ownedByUIDLabel = "projection.be0x74a.io/owned-by-uid"
+
 	conditionReady              = "Ready"
 	conditionSourceResolved     = "SourceResolved"
 	conditionDestinationWritten = "DestinationWritten"
@@ -66,7 +76,28 @@ const (
 	// selector-based Projections instead of listing all Projections.
 	selectorIndex      = "spec.hasNamespaceSelector"
 	selectorIndexValue = "true"
+
+	// selectorWriteConcurrency bounds the number of in-flight destination
+	// writes during selector-based fan-out. Each worker issues a Get plus
+	// (optionally) a Create or Update against the apiserver; HTTP/2
+	// multiplexing in client-go lets many of these share a single
+	// connection, but we cap the parallelism so a Projection matching
+	// thousands of namespaces can't DoS the apiserver or blow out
+	// controller memory with goroutines. 16 is a conservative default
+	// that comfortably fits within kube-apiserver APF budgets at
+	// production scale; a follow-up can make this configurable via flag
+	// if operators report a need.
+	selectorWriteConcurrency = 16
 )
+
+// nsFailure records a single per-namespace destination-write failure during
+// selector fan-out. The rollup block after the worker pool inspects these to
+// pick the most specific reason for the DestinationWritten=False condition.
+type nsFailure struct {
+	namespace string
+	reason    string
+	message   string
+}
 
 // SourceMode controls which source objects the operator is willing to
 // project. Configured once per controller via the --source-mode flag.
@@ -134,6 +165,34 @@ func (r *ProjectionReconciler) emit(proj *projectionv1.Projection, eventType, re
 // ensures the two sides can never drift.
 func sourceKey(apiVersion, kind, namespace, name string) string {
 	return apiVersion + "/" + kind + "/" + namespace + "/" + name
+}
+
+// benchStampAnnotation is the annotation the projection benchmark harness
+// writes on source objects to measure end-to-end propagation latency. Value
+// is a unix-nano timestamp. Presence of the annotation triggers a per-phase
+// latency log line in Reconcile; absence makes this a no-op in production.
+const benchStampAnnotation = "bench.projection.be0x74a.io/stamp"
+
+// logBenchStampLatency, when the source carries the benchmark harness's
+// stamp annotation, logs the wall-clock delta from stamp issuance at the
+// named reconcile phase. Used only by the bench harness to decompose the
+// observed e2e latency floor. No-op when the annotation is absent.
+func logBenchStampLatency(ctx context.Context, source *unstructured.Unstructured, phase string) {
+	v := source.GetAnnotations()[benchStampAnnotation]
+	if v == "" {
+		return
+	}
+	nanos, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return
+	}
+	delta := time.Since(time.Unix(0, nanos))
+	log.FromContext(ctx).Info("bench stamp latency",
+		"phase", phase,
+		"delta_ms", delta.Milliseconds(),
+		"name", source.GetName(),
+		"namespace", source.GetNamespace(),
+	)
 }
 
 // +kubebuilder:rbac:groups=projection.be0x74a.io,resources=projections,verbs=get;list;watch;create;update;patch;delete
@@ -204,6 +263,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		return r.handleSourceFetchError(ctx, proj, gvr, err)
 	}
+	logBenchStampLatency(ctx, source, "source-fetched")
 
 	// Opt-in / opt-out policy. If the source says it's not projectable (or
 	// didn't opt in under allowlist mode), clean up any destination we
@@ -225,72 +285,44 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", err.Error())
 	}
 
-	type nsFailure struct {
-		namespace string
-		reason    string
-		message   string
-	}
 	var failures []nsFailure
 	successSet := map[string]bool{}
 
+	// Fan out destination writes across a bounded worker pool. Sequential
+	// Gets+Updates serialize at ~3-4ms per round-trip, so a Projection
+	// matching 100 namespaces spends ~350ms of reconcile time waiting on
+	// the apiserver. HTTP/2 multiplexing handles the concurrency at the
+	// transport level; we just need to hand it enough work in parallel.
+	// The semaphore caps concurrency at selectorWriteConcurrency so we
+	// don't DoS the apiserver with a selector matching thousands of
+	// namespaces. `mu` guards the two accumulators; contention is minimal
+	// (tens of microseconds per reconcile in aggregate), so a single
+	// mutex is preferred over sharded accumulators.
+	sem := make(chan struct{}, selectorWriteConcurrency)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, targetNS := range destNamespaces {
-		dst := buildDestination(source, proj, targetNS)
-
-		existing := &unstructured.Unstructured{}
-		existing.SetGroupVersionKind(source.GroupVersionKind())
-		key := client.ObjectKey{Namespace: dst.GetNamespace(), Name: dst.GetName()}
-		switch fetchErr := r.Get(ctx, key, existing); {
-		case apierrors.IsNotFound(fetchErr):
-			if createErr := r.Create(ctx, dst); createErr != nil {
-				r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create",
-					fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
-				failures = append(failures, nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()})
-				continue
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(ns string) {
+			// Defers run LIFO: wg.Done() fires before the semaphore
+			// release. Both run even if writeOneDestination panics,
+			// which keeps the semaphore from leaking slots and the main
+			// goroutine from blocking forever on wg.Wait().
+			defer func() { <-sem }()
+			defer wg.Done()
+			ok, fail := r.writeOneDestination(ctx, proj, source, ns)
+			mu.Lock()
+			if fail != nil {
+				failures = append(failures, *fail)
 			}
-			r.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
-				fmt.Sprintf("projected %s %s/%s to %s/%s",
-					source.GroupVersionKind().String(),
-					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
-					dst.GetNamespace(), dst.GetName()))
-		case fetchErr != nil:
-			r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get",
-				fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
-			failures = append(failures, nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()})
-			continue
-		default:
-			if !isOwnedBy(existing, proj) {
-				msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
-					key.Namespace, key.Name)
-				r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", "Validate", msg)
-				failures = append(failures, nsFailure{targetNS, "DestinationConflict", msg})
-				continue
+			if ok {
+				successSet[ns] = true
 			}
-			// Carry over fields the apiserver allocated on create (clusterIP,
-			// volumeName, ...) — if we sent dst as-is, an Update of e.g. a Service
-			// would be rejected for trying to clear an immutable field.
-			preserveAPIServerAllocatedFields(existing, dst)
-			if !needsUpdate(existing, dst) {
-				// Destination already matches desired state. Skip the Update so
-				// we don't generate a noisy "Updated" event/metric on every
-				// reconcile of an unchanged Projection.
-				successSet[targetNS] = true
-				continue
-			}
-			dst.SetResourceVersion(existing.GetResourceVersion())
-			if updateErr := r.Update(ctx, dst); updateErr != nil {
-				r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update",
-					fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
-				failures = append(failures, nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()})
-				continue
-			}
-			r.emit(proj, corev1.EventTypeNormal, "Updated", "Update",
-				fmt.Sprintf("updated %s %s/%s to %s/%s",
-					source.GroupVersionKind().String(),
-					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
-					dst.GetNamespace(), dst.GetName()))
-		}
-		successSet[targetNS] = true
+			mu.Unlock()
+		}(targetNS)
 	}
+	wg.Wait()
 
 	// Clean up stale destinations that are no longer in the resolved set.
 	if err := r.cleanupStaleDestinations(ctx, proj, gvr, successSet); err != nil {
@@ -326,10 +358,90 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.markAllReady(ctx, proj); err != nil {
 		return ctrl.Result{}, err
 	}
+	logBenchStampLatency(ctx, source, "reconcile-end")
 
 	// No periodic requeue: the dynamic source watch registered above is
 	// authoritative for propagating future source edits.
 	return ctrl.Result{}, nil
+}
+
+// writeOneDestination reconciles a single destination namespace for proj.
+// It is safe to invoke concurrently for distinct targetNS values — the method
+// only reads the shared inputs (proj, source) and writes to the apiserver;
+// all per-reconcile accumulator state is returned to the caller. Events are
+// emitted here rather than in the caller so each worker surfaces its own
+// outcome without cross-goroutine coordination; the controller-runtime event
+// recorder is itself thread-safe.
+//
+// Returned (ok, failure) are orthogonal:
+//
+//   - ok=true, failure=nil: destination left in the desired state (created,
+//     updated, or already matching). Caller adds targetNS to successSet.
+//   - ok=false, failure=non-nil: per-namespace failure. Caller appends to
+//     the failures slice; the rollup block after the worker pool picks a
+//     reason and calls failDestination.
+//
+// ok=true with failure=non-nil is not a valid combination and the caller
+// is free to treat only one of the two.
+func (r *ProjectionReconciler) writeOneDestination(
+	ctx context.Context,
+	proj *projectionv1.Projection,
+	source *unstructured.Unstructured,
+	targetNS string,
+) (ok bool, failure *nsFailure) {
+	dst := buildDestination(source, proj, targetNS)
+
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(source.GroupVersionKind())
+	key := client.ObjectKey{Namespace: dst.GetNamespace(), Name: dst.GetName()}
+	switch fetchErr := r.Get(ctx, key, existing); {
+	case apierrors.IsNotFound(fetchErr):
+		if createErr := r.Create(ctx, dst); createErr != nil {
+			r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create",
+				fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
+			return false, &nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()}
+		}
+		r.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
+			fmt.Sprintf("projected %s %s/%s to %s/%s",
+				source.GroupVersionKind().String(),
+				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
+				dst.GetNamespace(), dst.GetName()))
+	case fetchErr != nil:
+		r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get",
+			fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
+		return false, &nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()}
+	default:
+		if !isOwnedBy(existing, proj) {
+			msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
+				key.Namespace, key.Name)
+			r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", "Validate", msg)
+			return false, &nsFailure{targetNS, "DestinationConflict", msg}
+		}
+		// Carry over fields the apiserver allocated on create (clusterIP,
+		// volumeName, ...) — if we sent dst as-is, an Update of e.g. a Service
+		// would be rejected for trying to clear an immutable field.
+		preserveAPIServerAllocatedFields(existing, dst)
+		if !needsUpdate(existing, dst) {
+			// Destination already matches desired state. Skip the Update so
+			// we don't generate a noisy "Updated" event/metric on every
+			// reconcile of an unchanged Projection. Still considered ok so
+			// the caller records it in successSet (keeps it out of the
+			// stale-cleanup set).
+			return true, nil
+		}
+		dst.SetResourceVersion(existing.GetResourceVersion())
+		if updateErr := r.Update(ctx, dst); updateErr != nil {
+			r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update",
+				fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
+			return false, &nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()}
+		}
+		r.emit(proj, corev1.EventTypeNormal, "Updated", "Update",
+			fmt.Sprintf("updated %s %s/%s to %s/%s",
+				source.GroupVersionKind().String(),
+				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
+				dst.GetNamespace(), dst.GetName()))
+	}
+	return true, nil
 }
 
 // ensureWatch registers a dynamic watch on the given source GVK if one is not
@@ -358,6 +470,7 @@ func (r *ProjectionReconciler) ensureWatch(gvk schema.GroupVersionKind) error {
 		return err
 	}
 	r.watched[gvk] = true
+	watchedGvks.Inc()
 	return nil
 }
 
@@ -451,47 +564,44 @@ func (r *ProjectionReconciler) deleteOneDestination(ctx context.Context, proj *p
 	return nil
 }
 
-// deleteAllOwnedDestinations scans all namespaces for destinations owned by
-// this Projection and deletes them. Used by the finalizer path for
-// selector-based Projections. O(namespaces) — runs once during deletion;
-// a full scan is necessary because the selector may have changed since
-// the last reconcile.
+// deleteAllOwnedDestinations deletes every destination owned by this
+// Projection. Used by the finalizer path for selector-based Projections,
+// where the selector may have changed since the last reconcile and we need
+// to sweep across all namespaces the Projection ever wrote to.
+//
+// Finds destinations via a single cluster-wide List on the destination GVK
+// filtered by the ownedByUIDLabel — O(owned) instead of O(all cluster
+// namespaces). The annotation is still checked as a belt-and-braces
+// ownership guard in case a stranger has manually set the label.
 func (r *ProjectionReconciler) deleteAllOwnedDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource) error {
 	ownerValue := proj.Namespace + "/" + proj.Name
-	destName := proj.Spec.Destination.Name
-	if destName == "" {
-		destName = proj.Spec.Source.Name
-	}
 
-	// List all namespaces and check each for an owned destination.
-	var nsList corev1.NamespaceList
-	if err := r.List(ctx, &nsList); err != nil {
-		return fmt.Errorf("listing namespaces for cleanup: %w", err)
+	owned, err := r.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", ownedByUIDLabel, proj.UID),
+	})
+	if err != nil {
+		return fmt.Errorf("listing owned destinations: %w", err)
 	}
 	var firstErr error
-	for i := range nsList.Items {
-		ns := nsList.Items[i].Name
-		existing, err := r.DynamicClient.Resource(gvr).Namespace(ns).Get(ctx, destName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
+	for i := range owned.Items {
+		obj := &owned.Items[i]
+		ns := obj.GetNamespace()
+		name := obj.GetName()
+		// Belt-and-braces: verify the annotation too. The label alone is
+		// enough for a cooperative system; checking the annotation protects
+		// against a malicious or buggy actor copying our label to a
+		// stranger's object and tricking the controller into deleting it.
+		if obj.GetAnnotations()[ownedByAnnotation] != ownerValue {
 			continue
 		}
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if existing.GetAnnotations()[ownedByAnnotation] != ownerValue {
-			continue
-		}
-		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, destName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
 		r.emit(proj, corev1.EventTypeNormal, "DestinationDeleted", "Delete",
-			fmt.Sprintf("%s/%s", ns, destName))
+			fmt.Sprintf("%s/%s", ns, name))
 	}
 	return firstErr
 }
@@ -546,50 +656,44 @@ func (r *ProjectionReconciler) resolveDestinationNamespaces(ctx context.Context,
 // cleanupStaleDestinations removes destinations in namespaces that are owned
 // by this Projection but are no longer in the current resolved set. This
 // handles the case where a namespace loses a label or the selector changes.
-// O(namespaces) per call — acceptable because namespace counts are typically
-// low and this only runs for selector-based Projections.
+// O(owned destinations) per call via a single cluster-wide List filtered by
+// the ownedByUIDLabel — independent of total cluster namespace count (#33).
+// Runs only for selector-based Projections.
 func (r *ProjectionReconciler) cleanupStaleDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, currentSet map[string]bool) error {
 	// Only needed for selector-based Projections.
 	if proj.Spec.Destination.NamespaceSelector == nil {
 		return nil
 	}
 	ownerValue := proj.Namespace + "/" + proj.Name
-	destName := proj.Spec.Destination.Name
-	if destName == "" {
-		destName = proj.Spec.Source.Name
-	}
 
-	var nsList corev1.NamespaceList
-	if err := r.List(ctx, &nsList); err != nil {
-		return fmt.Errorf("listing namespaces for stale cleanup: %w", err)
+	owned, err := r.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", ownedByUIDLabel, proj.UID),
+	})
+	if err != nil {
+		return fmt.Errorf("listing owned destinations for stale cleanup: %w", err)
 	}
 	var firstErr error
-	for i := range nsList.Items {
-		ns := nsList.Items[i].Name
+	for i := range owned.Items {
+		obj := &owned.Items[i]
+		ns := obj.GetNamespace()
 		if currentSet[ns] {
 			continue // still in the resolved set, keep it
 		}
-		existing, err := r.DynamicClient.Resource(gvr).Namespace(ns).Get(ctx, destName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
+		// Belt-and-braces ownership check; see deleteAllOwnedDestinations
+		// for why the label alone isn't sufficient when the namespace is
+		// controlled by someone other than us.
+		if obj.GetAnnotations()[ownedByAnnotation] != ownerValue {
 			continue
 		}
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if existing.GetAnnotations()[ownedByAnnotation] != ownerValue {
-			continue
-		}
-		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, destName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		name := obj.GetName()
+		if err := r.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
 		r.emit(proj, corev1.EventTypeNormal, "StaleDestinationDeleted", "Delete",
-			fmt.Sprintf("%s/%s", ns, destName))
+			fmt.Sprintf("%s/%s", ns, name))
 	}
 	return firstErr
 }
@@ -836,16 +940,15 @@ func buildDestination(source *unstructured.Unstructured, proj *projectionv1.Proj
 	annotations[ownedByAnnotation] = proj.Namespace + "/" + proj.Name
 	dst.SetAnnotations(annotations)
 
-	if len(proj.Spec.Overlay.Labels) > 0 {
-		lbls := dst.GetLabels()
-		if lbls == nil {
-			lbls = map[string]string{}
-		}
-		for k, v := range proj.Spec.Overlay.Labels {
-			lbls[k] = v
-		}
-		dst.SetLabels(lbls)
+	lbls := dst.GetLabels()
+	if lbls == nil {
+		lbls = map[string]string{}
 	}
+	for k, v := range proj.Spec.Overlay.Labels {
+		lbls[k] = v
+	}
+	lbls[ownedByUIDLabel] = string(proj.UID)
+	dst.SetLabels(lbls)
 
 	name := proj.Spec.Destination.Name
 	if name == "" {
