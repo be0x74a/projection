@@ -76,7 +76,28 @@ const (
 	// selector-based Projections instead of listing all Projections.
 	selectorIndex      = "spec.hasNamespaceSelector"
 	selectorIndexValue = "true"
+
+	// selectorWriteConcurrency bounds the number of in-flight destination
+	// writes during selector-based fan-out. Each worker issues a Get plus
+	// (optionally) a Create or Update against the apiserver; HTTP/2
+	// multiplexing in client-go lets many of these share a single
+	// connection, but we cap the parallelism so a Projection matching
+	// thousands of namespaces can't DoS the apiserver or blow out
+	// controller memory with goroutines. 16 is a conservative default
+	// that comfortably fits within kube-apiserver APF budgets at
+	// production scale; a follow-up can make this configurable via flag
+	// if operators report a need.
+	selectorWriteConcurrency = 16
 )
+
+// nsFailure records a single per-namespace destination-write failure during
+// selector fan-out. The rollup block after the worker pool inspects these to
+// pick the most specific reason for the DestinationWritten=False condition.
+type nsFailure struct {
+	namespace string
+	reason    string
+	message   string
+}
 
 // SourceMode controls which source objects the operator is willing to
 // project. Configured once per controller via the --source-mode flag.
@@ -264,72 +285,44 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", err.Error())
 	}
 
-	type nsFailure struct {
-		namespace string
-		reason    string
-		message   string
-	}
 	var failures []nsFailure
 	successSet := map[string]bool{}
 
+	// Fan out destination writes across a bounded worker pool. Sequential
+	// Gets+Updates serialize at ~3-4ms per round-trip, so a Projection
+	// matching 100 namespaces spends ~350ms of reconcile time waiting on
+	// the apiserver. HTTP/2 multiplexing handles the concurrency at the
+	// transport level; we just need to hand it enough work in parallel.
+	// The semaphore caps concurrency at selectorWriteConcurrency so we
+	// don't DoS the apiserver with a selector matching thousands of
+	// namespaces. `mu` guards the two accumulators; contention is minimal
+	// (tens of microseconds per reconcile in aggregate), so a single
+	// mutex is preferred over sharded accumulators.
+	sem := make(chan struct{}, selectorWriteConcurrency)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, targetNS := range destNamespaces {
-		dst := buildDestination(source, proj, targetNS)
-
-		existing := &unstructured.Unstructured{}
-		existing.SetGroupVersionKind(source.GroupVersionKind())
-		key := client.ObjectKey{Namespace: dst.GetNamespace(), Name: dst.GetName()}
-		switch fetchErr := r.Get(ctx, key, existing); {
-		case apierrors.IsNotFound(fetchErr):
-			if createErr := r.Create(ctx, dst); createErr != nil {
-				r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create",
-					fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
-				failures = append(failures, nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()})
-				continue
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(ns string) {
+			// Defers run LIFO: wg.Done() fires before the semaphore
+			// release. Both run even if writeOneDestination panics,
+			// which keeps the semaphore from leaking slots and the main
+			// goroutine from blocking forever on wg.Wait().
+			defer func() { <-sem }()
+			defer wg.Done()
+			ok, fail := r.writeOneDestination(ctx, proj, source, ns)
+			mu.Lock()
+			if fail != nil {
+				failures = append(failures, *fail)
 			}
-			r.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
-				fmt.Sprintf("projected %s %s/%s to %s/%s",
-					source.GroupVersionKind().String(),
-					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
-					dst.GetNamespace(), dst.GetName()))
-		case fetchErr != nil:
-			r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get",
-				fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
-			failures = append(failures, nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()})
-			continue
-		default:
-			if !isOwnedBy(existing, proj) {
-				msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
-					key.Namespace, key.Name)
-				r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", "Validate", msg)
-				failures = append(failures, nsFailure{targetNS, "DestinationConflict", msg})
-				continue
+			if ok {
+				successSet[ns] = true
 			}
-			// Carry over fields the apiserver allocated on create (clusterIP,
-			// volumeName, ...) — if we sent dst as-is, an Update of e.g. a Service
-			// would be rejected for trying to clear an immutable field.
-			preserveAPIServerAllocatedFields(existing, dst)
-			if !needsUpdate(existing, dst) {
-				// Destination already matches desired state. Skip the Update so
-				// we don't generate a noisy "Updated" event/metric on every
-				// reconcile of an unchanged Projection.
-				successSet[targetNS] = true
-				continue
-			}
-			dst.SetResourceVersion(existing.GetResourceVersion())
-			if updateErr := r.Update(ctx, dst); updateErr != nil {
-				r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update",
-					fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
-				failures = append(failures, nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()})
-				continue
-			}
-			r.emit(proj, corev1.EventTypeNormal, "Updated", "Update",
-				fmt.Sprintf("updated %s %s/%s to %s/%s",
-					source.GroupVersionKind().String(),
-					proj.Spec.Source.Namespace, proj.Spec.Source.Name,
-					dst.GetNamespace(), dst.GetName()))
-		}
-		successSet[targetNS] = true
+			mu.Unlock()
+		}(targetNS)
 	}
+	wg.Wait()
 
 	// Clean up stale destinations that are no longer in the resolved set.
 	if err := r.cleanupStaleDestinations(ctx, proj, gvr, successSet); err != nil {
@@ -370,6 +363,85 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// No periodic requeue: the dynamic source watch registered above is
 	// authoritative for propagating future source edits.
 	return ctrl.Result{}, nil
+}
+
+// writeOneDestination reconciles a single destination namespace for proj.
+// It is safe to invoke concurrently for distinct targetNS values — the method
+// only reads the shared inputs (proj, source) and writes to the apiserver;
+// all per-reconcile accumulator state is returned to the caller. Events are
+// emitted here rather than in the caller so each worker surfaces its own
+// outcome without cross-goroutine coordination; the controller-runtime event
+// recorder is itself thread-safe.
+//
+// Returned (ok, failure) are orthogonal:
+//
+//   - ok=true, failure=nil: destination left in the desired state (created,
+//     updated, or already matching). Caller adds targetNS to successSet.
+//   - ok=false, failure=non-nil: per-namespace failure. Caller appends to
+//     the failures slice; the rollup block after the worker pool picks a
+//     reason and calls failDestination.
+//
+// ok=true with failure=non-nil is not a valid combination and the caller
+// is free to treat only one of the two.
+func (r *ProjectionReconciler) writeOneDestination(
+	ctx context.Context,
+	proj *projectionv1.Projection,
+	source *unstructured.Unstructured,
+	targetNS string,
+) (ok bool, failure *nsFailure) {
+	dst := buildDestination(source, proj, targetNS)
+
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(source.GroupVersionKind())
+	key := client.ObjectKey{Namespace: dst.GetNamespace(), Name: dst.GetName()}
+	switch fetchErr := r.Get(ctx, key, existing); {
+	case apierrors.IsNotFound(fetchErr):
+		if createErr := r.Create(ctx, dst); createErr != nil {
+			r.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create",
+				fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
+			return false, &nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()}
+		}
+		r.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
+			fmt.Sprintf("projected %s %s/%s to %s/%s",
+				source.GroupVersionKind().String(),
+				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
+				dst.GetNamespace(), dst.GetName()))
+	case fetchErr != nil:
+		r.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get",
+			fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
+		return false, &nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()}
+	default:
+		if !isOwnedBy(existing, proj) {
+			msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
+				key.Namespace, key.Name)
+			r.emit(proj, corev1.EventTypeWarning, "DestinationConflict", "Validate", msg)
+			return false, &nsFailure{targetNS, "DestinationConflict", msg}
+		}
+		// Carry over fields the apiserver allocated on create (clusterIP,
+		// volumeName, ...) — if we sent dst as-is, an Update of e.g. a Service
+		// would be rejected for trying to clear an immutable field.
+		preserveAPIServerAllocatedFields(existing, dst)
+		if !needsUpdate(existing, dst) {
+			// Destination already matches desired state. Skip the Update so
+			// we don't generate a noisy "Updated" event/metric on every
+			// reconcile of an unchanged Projection. Still considered ok so
+			// the caller records it in successSet (keeps it out of the
+			// stale-cleanup set).
+			return true, nil
+		}
+		dst.SetResourceVersion(existing.GetResourceVersion())
+		if updateErr := r.Update(ctx, dst); updateErr != nil {
+			r.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update",
+				fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
+			return false, &nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()}
+		}
+		r.emit(proj, corev1.EventTypeNormal, "Updated", "Update",
+			fmt.Sprintf("updated %s %s/%s to %s/%s",
+				source.GroupVersionKind().String(),
+				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
+				dst.GetNamespace(), dst.GetName()))
+	}
+	return true, nil
 }
 
 // ensureWatch registers a dynamic watch on the given source GVK if one is not
