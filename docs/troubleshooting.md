@@ -79,4 +79,60 @@ When either reason fires, the controller cleans up any destination it previously
 
 ## `DestinationWritten` failures
 
-<!-- entries filled in subsequent tasks -->
+### SourceNotResolved
+
+An unusual reason: it is stamped on `DestinationWritten` with status `Unknown`, not `False`. It is a cascade marker, not an independent failure — the controller sets it whenever a `SourceResolved` failure means the write stage was never attempted.
+
+If you see `SourceNotResolved`, the real failure is on the `SourceResolved` condition. Read that reason and the matching entry above:
+
+- [SourceResolutionFailed](#sourceresolutionfailed)
+- [SourceFetchFailed](#sourcefetchfailed)
+- [SourceDeleted](#sourcedeleted)
+- [SourceOptedOut / SourceNotProjectable](#sourceoptedout--sourcenotprojectable)
+
+**Fix:** resolve the upstream `SourceResolved` failure. `SourceNotResolved` will clear on the next reconcile.
+
+### InvalidSpec
+
+The controller rejected the spec before attempting any work. Today there is exactly one trigger: both `destination.namespace` and `destination.namespaceSelector` are set on the same `Projection`. The two fields are mutually exclusive — either you target one namespace by name, or you fan out to every namespace matching a selector, not both.
+
+CEL admission enforces this on apiservers that support it (k8s 1.32+), so most clusters will reject an offending `Projection` at `kubectl apply` time. The reconciler keeps a belt-and-braces runtime check for older apiservers (1.31 and earlier) whose CEL lacks the primitives needed to resolve optional fields reliably.
+
+**Fix:** decide which destination shape you want and remove the other field.
+
+```yaml
+# Single destination namespace
+spec:
+  destination:
+    namespace: tenant-a
+# …or selector-based fan-out, not both
+spec:
+  destination:
+    namespaceSelector:
+      matchLabels:
+        tier: tenant
+```
+
+### NamespaceResolutionFailed
+
+The `Projection` uses `destination.namespaceSelector` and resolving that selector to a concrete list of namespaces failed. One of two things happened:
+
+- **The selector is syntactically invalid.** `metav1.LabelSelectorAsSelector` rejected it. This is rare in practice because the CRD schema accepts any `LabelSelector`, but malformed `matchExpressions` (e.g. `operator: In` with an empty `values` list) trip it.
+- **The `List` on namespaces failed.** Typically RBAC — the controller needs `list` on `namespaces` at cluster scope, which the upstream install grants. If you have narrowed RBAC, confirm namespace list permission is intact.
+
+An empty match set is **not** an error — if your selector matches zero namespaces, reconcile succeeds with nothing to write and you will not see this reason. You will see `Ready=True` with no destinations anywhere, which is its own form of "something's wrong" but not one this doc covers.
+
+**Fix:** check the selector syntax with `kubectl get ns -l '<selector>'` and confirm the operator's `ClusterRole` allows `list` on `namespaces`.
+
+### DestinationFetchFailed
+
+For each target namespace, the controller first issues a `Get` to check whether a destination already exists (so it can decide between create and update, and verify ownership). That `Get` failed with an error other than `404 NotFound` (a 404 is the expected "not there yet" case and does not fail).
+
+Typical causes:
+
+- **RBAC.** The controller's `ServiceAccount` lacks `get` on the destination Kind in the target namespace. Same narrowed-RBAC failure mode as [`SourceFetchFailed`](#sourcefetchfailed) — if you use the Helm chart's `supportedKinds` list, confirm the Kind is listed.
+- **Apiserver transient error.** 5xx, timeout. Clears on requeue.
+
+For selector-based `Projection`s this can fire in some namespaces and not others; see [DestinationWriteFailed](#destinationwritefailed) for how the rollup reason works when failures differ per namespace.
+
+**Fix:** widen RBAC for the destination Kind, or wait for the transient to clear.
