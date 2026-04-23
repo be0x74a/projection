@@ -136,3 +136,60 @@ Typical causes:
 For selector-based `Projection`s this can fire in some namespaces and not others; see [DestinationWriteFailed](#destinationwritefailed) for how the rollup reason works when failures differ per namespace.
 
 **Fix:** widen RBAC for the destination Kind, or wait for the transient to clear.
+
+### DestinationConflict
+
+The most important entry in this guide. The controller fetched an existing object at the destination coordinates and found that it is **not owned by this `Projection`**. Ownership is established by the annotation `projection.be0x74a.io/owned-by: <projection-namespace>/<projection-name>`, which the controller stamps on every destination it creates. If that annotation is missing or points at a different `Projection`, the controller refuses to update — the object belongs to something or someone else.
+
+This is the invariant that makes `projection` safe to adopt alongside other tooling: we will never silently overwrite an object we didn't create. Conflict-safety is a design property, not a bug.
+
+One cause: an object with the same name and Kind already exists at your chosen destination coordinates, and it was not created by this `Projection`. Typical scenarios:
+
+- Another tool (Helm, Kustomize, Kyverno `generate`, a different `Projection`) manages that name.
+- A human created the object directly via `kubectl apply`.
+- A previous `Projection` created the object, was deleted, and somebody or something stripped the ownership annotation before you created the new `Projection`.
+
+**Fix:** the resolution is a human decision, not a mechanical one.
+
+- **Delete the pre-existing object** if it is genuinely stale and you want `projection` to take over. Do this knowingly — check `kubectl get <kind>/<name> -o yaml` first to confirm nothing important lives there.
+- **Rename the destination.** Set `destination.name` on the `Projection` to a name that doesn't collide.
+- **Accept the conflict.** The `Projection` stays at `Ready=False` and does nothing. This is a legitimate steady state — it means "another tool owns this name; defer to them."
+
+Do **not** manually add the ownership annotation to an object you didn't create. That tells `projection` it can update and delete the object, which would then propagate changes from the source — almost certainly not what you want.
+
+### DestinationCreateFailed
+
+The destination does not yet exist (the preceding `Get` returned 404) and the `Create` call was rejected by the apiserver.
+
+Typical causes:
+
+- **Admission webhook rejection.** A validating or mutating webhook in the target namespace rejected the create. `ResourceQuota` violations surface here (e.g. "exceeded quota: pods"). So do policy engines: Kyverno `validate` policies, OPA Gatekeeper, network policy admission.
+- **RBAC.** The controller lacks `create` on the destination Kind. With default RBAC this does not happen; with narrowed RBAC it does.
+- **Field-level validation.** The destination object, after overlay application, violates CRD or built-in schema validation. This is rare because the source object itself was admitted at its own create time, but overlays that rewrite fields in invalid ways can trip it.
+
+**Fix:** read the error message carefully — the apiserver is usually specific about what rejected the create and why. For webhook rejections, the webhook's name is in the error; investigate that policy. For RBAC, widen the `ClusterRole`.
+
+### DestinationUpdateFailed
+
+The destination already exists and is owned by this `Projection`, but the `Update` call was rejected. Same failure surface as [`DestinationCreateFailed`](#destinationcreatefailed) but on the overwrite path, with two additional wrinkles specific to updates:
+
+- **Conflict (409).** Another client modified the destination between our `Get` and our `Update`. The controller re-queues and the next reconcile reads the fresh resourceVersion. Self-clearing; if it persists, some other tool is writing to the destination in a tight loop.
+- **Immutable field change.** The controller strips server-assigned fields (`clusterIP`, `volumeName`, `nodeName`) before building the destination and restores them from the existing object before Update, specifically to avoid this. If you see "field is immutable" in the error, it is a bug — the set of preserved fields (`droppedSpecFieldsByGVK` in the controller source) is likely missing an entry. Please [open an issue](https://github.com/be0x74a/projection/issues/new) with the Kind and the field name.
+
+**Fix:** for webhook/RBAC errors, same remedies as [`DestinationCreateFailed`](#destinationcreatefailed). For 409 conflicts, wait one reconcile. For immutable-field errors, file a bug.
+
+### DestinationWriteFailed
+
+A rollup reason, emitted only by selector-based `Projection`s. When the destination write fan-out hits failures in multiple namespaces and those failures have **different reasons**, the controller refuses to pick one arbitrarily and surfaces `DestinationWriteFailed` instead. If every failing namespace shares the same underlying reason (all `DestinationConflict`, say), that shared reason is used directly — you only see `DestinationWriteFailed` when the failures are heterogeneous.
+
+The condition `message` lists the failing namespaces (`failed namespaces: ns-a, ns-b, ns-c`), but the actual causes are only in the per-namespace Events. This is deliberate: a single status message cannot faithfully encode three different failure modes.
+
+**Fix:** drill into Events to see each namespace's actual reason. From [observability.md](observability.md#kubernetes-events):
+
+```bash
+kubectl -n <projection-ns> get events.events.k8s.io \
+  --field-selector regarding.name=<projection-name>,regarding.kind=Projection \
+  --sort-by=.lastTimestamp
+```
+
+You will see one Warning event per failed namespace, each carrying its own reason (`DestinationConflict`, `DestinationCreateFailed`, etc.). Resolve each one using the matching entry in this guide.
