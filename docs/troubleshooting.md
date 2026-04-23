@@ -11,7 +11,7 @@ Every entry assumes you have already located the failing condition. If you haven
 - [SourceResolutionFailed](#sourceresolutionfailed)
 - [SourceFetchFailed](#sourcefetchfailed)
 - [SourceDeleted](#sourcedeleted)
-- [SourceOptedOut / SourceNotProjectable](#sourceoptedout--sourcenotprojectable)
+- [SourceOptedOut / SourceNotProjectable](#sourceoptedout-sourcenotprojectable)
 
 **`DestinationWritten` failures** — the controller located the source but could not write the destination:
 
@@ -28,7 +28,7 @@ Every entry assumes you have already located the failing condition. If you haven
 
 ### SourceResolutionFailed
 
-The controller asked the apiserver's RESTMapper to translate `source.apiVersion` and `source.kind` into a `GroupVersionResource` and the mapper refused. No `Get` against your source has happened yet — this is a type-system error.
+The controller tried to translate `source.apiVersion` and `source.kind` into a `GroupVersionResource` and one of two gates refused: either the apiserver's RESTMapper could not find the `{Group, Kind}` mapping at all, or the mapping succeeded but the resolved Kind is cluster-scoped (the controller rejects cluster-scoped Kinds outright because `projection` only mirrors namespaced resources). No `Get` against your source has happened yet — this is a type-system error.
 
 Three things can cause it:
 
@@ -44,11 +44,11 @@ The GVR resolved and the controller issued a `Get` against the source object, bu
 
 Typical causes, in rough order of frequency:
 
-- **RBAC.** The controller's `ServiceAccount` lacks `get` on the source Kind. The upstream install grants `"*"/"*"`, so this only shows up when you have narrowed RBAC via the Helm `supportedKinds` values list and forgotten to include the Kind you want to project. Error text includes `cannot get resource <kind> in API group <group>`.
+- **RBAC.** The controller's `ServiceAccount` lacks `get` on the source Kind. The upstream install grants wildcard `group="*" resource="*"` access, so this only shows up if you have manually narrowed the `ClusterRole`. Error text includes `cannot get resource <kind> in API group <group>`.
 - **Apiserver transient.** 5xx, timeout, connection reset. The controller re-queues; these clear on their own.
 - **Admission webhook intercepting `Get`.** Rare, but some validating webhooks are misconfigured to apply to `GET` verbs. Controller logs show the webhook name in the error.
 
-**Fix:** For RBAC, add the Kind to the operator's `ClusterRole` (or the Helm `supportedKinds` list if you use the chart). For transient errors, wait — the next reconcile will succeed. For admission interception, fix the webhook's `operations` scope to exclude read verbs.
+**Fix:** For RBAC, restore the controller's `ClusterRole` to include the Kind you want to project (the upstream install grants wildcard access, so this only applies if you have narrowed it manually). For transient errors, wait — the next reconcile will succeed. For admission interception, fix the webhook's `operations` scope to exclude read verbs.
 
 ### SourceDeleted
 
@@ -88,7 +88,7 @@ If you see `SourceNotResolved`, the real failure is on the `SourceResolved` cond
 - [SourceResolutionFailed](#sourceresolutionfailed)
 - [SourceFetchFailed](#sourcefetchfailed)
 - [SourceDeleted](#sourcedeleted)
-- [SourceOptedOut / SourceNotProjectable](#sourceoptedout--sourcenotprojectable)
+- [SourceOptedOut / SourceNotProjectable](#sourceoptedout-sourcenotprojectable)
 
 **Fix:** resolve the upstream `SourceResolved` failure. `SourceNotResolved` will clear on the next reconcile.
 
@@ -101,11 +101,16 @@ CEL admission enforces this on apiservers that support it (k8s 1.32+), so most c
 **Fix:** decide which destination shape you want and remove the other field.
 
 ```yaml
-# Single destination namespace
+# Option A — single destination namespace
 spec:
   destination:
     namespace: tenant-a
-# …or selector-based fan-out, not both
+```
+
+…or:
+
+```yaml
+# Option B — selector-based fan-out
 spec:
   destination:
     namespaceSelector:
@@ -130,12 +135,12 @@ For each target namespace, the controller first issues a `Get` to check whether 
 
 Typical causes:
 
-- **RBAC.** The controller's `ServiceAccount` lacks `get` on the destination Kind in the target namespace. Same narrowed-RBAC failure mode as [`SourceFetchFailed`](#sourcefetchfailed) — if you use the Helm chart's `supportedKinds` list, confirm the Kind is listed.
+- **RBAC.** The controller's `ServiceAccount` lacks `get` on the destination Kind in the target namespace. Same narrowed-RBAC failure mode as [`SourceFetchFailed`](#sourcefetchfailed) — the upstream install grants wildcard access, so this only shows up if you have manually narrowed the `ClusterRole`.
 - **Apiserver transient error.** 5xx, timeout. Clears on requeue.
 
 For selector-based `Projection`s this can fire in some namespaces and not others; see [DestinationWriteFailed](#destinationwritefailed) for how the rollup reason works when failures differ per namespace.
 
-**Fix:** widen RBAC for the destination Kind, or wait for the transient to clear.
+**Fix:** Restore the destination Kind to the controller's `ClusterRole`, or wait for the transient to clear.
 
 ### DestinationConflict
 
@@ -184,7 +189,7 @@ A rollup reason, emitted only by selector-based `Projection`s. When the destinat
 
 The condition `message` lists the failing namespaces (`failed namespaces: ns-a, ns-b, ns-c`), but the actual causes are only in the per-namespace Events. This is deliberate: a single status message cannot faithfully encode three different failure modes.
 
-**Fix:** drill into Events to see each namespace's actual reason. From [observability.md](observability.md#kubernetes-events):
+**Fix:** drill into Events to see each namespace's actual reason. From [observability.md](observability.md#2-kubernetes-events):
 
 ```bash
 kubectl -n <projection-ns> get events.events.k8s.io \
