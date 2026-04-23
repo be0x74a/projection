@@ -2,6 +2,8 @@
 
 This walks through installing the `projection` operator and creating your first `Projection`.
 
+> **Upgrading from v0.1.0-alpha?** Read the [upgrade guide](upgrade.md) first — v0.2 introduces a source-annotation requirement that needs a one-time migration.
+
 ## Prerequisites
 
 - A Kubernetes cluster (1.32+ required — the CRD uses CEL admission validation, which needs this minimum version).
