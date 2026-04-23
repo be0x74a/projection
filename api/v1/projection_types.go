@@ -89,7 +89,8 @@ type Overlay struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// ProjectionSpec defines the desired state of Projection.
+// ProjectionSpec specifies which source object to mirror, where to write it,
+// and what metadata overlays to apply.
 type ProjectionSpec struct {
 	// Source is the object to project from.
 	Source SourceRef `json:"source"`
@@ -101,7 +102,8 @@ type ProjectionSpec struct {
 	Overlay Overlay `json:"overlay,omitempty"`
 }
 
-// ProjectionStatus defines the observed state of Projection.
+// ProjectionStatus reports the most recent reconcile outcome via three
+// conditions: SourceResolved, DestinationWritten, and Ready.
 type ProjectionStatus struct {
 	// Conditions reflect the current state of the projection. The controller
 	// sets type "Ready" to True once the destination has been written, or
@@ -112,14 +114,20 @@ type ProjectionStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=proj
 // +kubebuilder:printcolumn:name="Kind",type=string,JSONPath=`.spec.source.kind`
 // +kubebuilder:printcolumn:name="Source-Namespace",type=string,JSONPath=`.spec.source.namespace`
 // +kubebuilder:printcolumn:name="Source-Name",type=string,JSONPath=`.spec.source.name`
 // +kubebuilder:printcolumn:name="Destination",type=string,JSONPath=`.spec.destination.name`
+// +kubebuilder:printcolumn:name="Destination-Selector",type=string,JSONPath=`.spec.destination.namespaceSelector.matchLabels`,priority=1
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// Projection is the Schema for the projections API.
+// Projection mirrors one Kubernetes object from a source location to one or
+// more destination namespaces, declaratively and conflict-safely. Source
+// edits propagate to destinations in ~100ms via dynamic watches. Destinations
+// carry a projection.be0x74a.io/owned-by annotation the controller uses to
+// refuse overwriting resources it did not create.
 type Projection struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

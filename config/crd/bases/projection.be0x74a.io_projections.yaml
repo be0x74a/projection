@@ -11,6 +11,8 @@ spec:
     kind: Projection
     listKind: ProjectionList
     plural: projections
+    shortNames:
+    - proj
     singular: projection
   scope: Namespaced
   versions:
@@ -27,6 +29,10 @@ spec:
     - jsonPath: .spec.destination.name
       name: Destination
       type: string
+    - jsonPath: .spec.destination.namespaceSelector.matchLabels
+      name: Destination-Selector
+      priority: 1
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
@@ -36,7 +42,12 @@ spec:
     name: v1
     schema:
       openAPIV3Schema:
-        description: Projection is the Schema for the projections API.
+        description: |-
+          Projection mirrors one Kubernetes object from a source location to one or
+          more destination namespaces, declaratively and conflict-safely. Source
+          edits propagate to destinations in ~100ms via dynamic watches. Destinations
+          carry a projection.be0x74a.io/owned-by annotation the controller uses to
+          refuse overwriting resources it did not create.
         properties:
           apiVersion:
             description: |-
@@ -56,7 +67,9 @@ spec:
           metadata:
             type: object
           spec:
-            description: ProjectionSpec defines the desired state of Projection.
+            description: |-
+              ProjectionSpec specifies which source object to mirror, where to write it,
+              and what metadata overlays to apply.
             properties:
               destination:
                 description: Destination controls where the projected object is written.
@@ -189,7 +202,9 @@ spec:
             - source
             type: object
           status:
-            description: ProjectionStatus defines the observed state of Projection.
+            description: |-
+              ProjectionStatus reports the most recent reconcile outcome via three
+              conditions: SourceResolved, DestinationWritten, and Ready.
             properties:
               conditions:
                 description: |-
