@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-generated `docs/api-reference.md` driven by [elastic/crd-ref-docs](https://github.com/elastic/crd-ref-docs). Regenerate via `make docs-ref`; a CI drift-check (`docs-ref` job) fails if `docs/api-reference.md` diverges from `api/v1/projection_types.go`. `docs/crd-reference.md` retains narrative content (invariants, condition reasons, examples). (#35)
 - Source deletion triggers destination cleanup. When a Projection's source returns 404 from the apiserver, the controller deletes all owned destinations (single or selector-based fan-out), sets `SourceResolved=False reason=SourceDeleted`, and emits a single `Warning SourceDeleted` event. Other source-fetch errors (transient connectivity, RBAC blips, 5xx) keep the `SourceFetchFailed` behavior and do not cause destination churn. (#36)
 - E2e and integration coverage for operational failure modes (part of #36): source-namespace Terminating (regression guard — reconcile stays healthy while source still exists), destination-namespace Terminating (surfaces `DestinationCreateFailed` without busy-looping), non-existent source Kind (surfaces `SourceResolutionFailed`), and shared-watch idempotency when multiple Projections reference the same source GVK (verified via a real-manager envtest spec). (#36)
+- `hack/migrate-to-v1.sh`: annotation migration script for `v0.1.0-alpha` users upgrading to v0.2. See `docs/upgrade.md`.
 
 ### Changed
 
