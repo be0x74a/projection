@@ -50,6 +50,7 @@ nav:
   - Use cases: use-cases.md
   - vs alternatives: comparison.md
   - Observability: observability.md
+  - Troubleshooting: troubleshooting.md
   - Scale: scale.md
   - Security: security.md
   - Limitations & roadmap: limitations.md
