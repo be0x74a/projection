@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:golint,revive
@@ -135,6 +136,17 @@ func GetProjectDir() (string, error) {
 	if err != nil {
 		return wd, err
 	}
-	wd = strings.Replace(wd, "/test/e2e", "", -1)
-	return wd, nil
+	// Walk up from cwd until we find a go.mod — the repo root. Robust across
+	// any test package location (test/e2e, test/e2e-upgrade, test/bench, etc.).
+	dir := wd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return wd, fmt.Errorf("go.mod not found walking up from %q", wd)
+		}
+		dir = parent
+	}
 }
