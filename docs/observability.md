@@ -47,13 +47,15 @@ kubectl -n <ns> wait --for=condition=Ready projection/<name> --timeout=60s
 
 ### Reasons you'll see
 
+Each failure-mode reason below links to its entry in the [troubleshooting guide](troubleshooting.md).
+
 | Condition            | Status  | Reason                                                                                                  |
 | -------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
 | `SourceResolved`     | True    | `Resolved`                                                                                              |
-| `SourceResolved`     | False   | `SourceResolutionFailed` (RESTMapper can't find Kind), `SourceFetchFailed` (object not found / RBAC)    |
+| `SourceResolved`     | False   | [`SourceResolutionFailed`](troubleshooting.md#sourceresolutionfailed) (RESTMapper can't find Kind), [`SourceFetchFailed`](troubleshooting.md#sourcefetchfailed) (object not found / RBAC), [`SourceDeleted`](troubleshooting.md#sourcedeleted), [`SourceOptedOut`](troubleshooting.md#sourceoptedout-sourcenotprojectable) / [`SourceNotProjectable`](troubleshooting.md#sourceoptedout-sourcenotprojectable) |
 | `DestinationWritten` | True    | `Projected`                                                                                             |
-| `DestinationWritten` | False   | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`   |
-| `DestinationWritten` | Unknown | `SourceNotResolved` (never attempted because source step failed)                                        |
+| `DestinationWritten` | False   | [`InvalidSpec`](troubleshooting.md#invalidspec), [`NamespaceResolutionFailed`](troubleshooting.md#namespaceresolutionfailed), [`DestinationCreateFailed`](troubleshooting.md#destinationcreatefailed), [`DestinationUpdateFailed`](troubleshooting.md#destinationupdatefailed), [`DestinationFetchFailed`](troubleshooting.md#destinationfetchfailed), [`DestinationConflict`](troubleshooting.md#destinationconflict), [`DestinationWriteFailed`](troubleshooting.md#destinationwritefailed) |
+| `DestinationWritten` | Unknown | [`SourceNotResolved`](troubleshooting.md#sourcenotresolved) (never attempted because source step failed)                                        |
 | `Ready`              | True    | `Projected`                                                                                             |
 | `Ready`              | False   | Mirrors whichever upstream condition failed (same reason & message)                                     |
 
