@@ -70,12 +70,16 @@ fi
 # Enumerate Projections and extract unique source tuples. The jq pipeline
 # produces tab-separated (apiVersion, kind, namespace, name) lines; `sort -u`
 # dedupes the case where multiple Projections share the same source.
-sources=$("${KCTL[@]}" get projections.projection.be0x74a.io -A -o json 2>/dev/null \
-    | jq -r '.items[]
-        | [.spec.source.apiVersion, .spec.source.kind,
-           .spec.source.namespace, .spec.source.name]
-        | @tsv' \
-    | sort -u)
+if ! projections_json=$("${KCTL[@]}" get projections.projection.be0x74a.io -A -o json 2>&1); then
+    echo "error: failed to list Projections — is the CRD installed?" >&2
+    echo "$projections_json" >&2
+    exit 1
+fi
+
+sources=$(printf '%s' "$projections_json" | jq -r '.items[]
+    | [.spec.source.apiVersion, .spec.source.kind,
+       .spec.source.namespace, .spec.source.name]
+    | @tsv' | sort -u)
 
 if [[ -z "$sources" ]]; then
     echo "no Projections found; nothing to migrate."
@@ -91,8 +95,18 @@ count_skip_not_found=0
 exit_code=0
 
 while IFS=$'\t' read -r api kind ns name; do
-    # -o json returns "", which jq treats as null, if the object is missing.
-    existing=$("${KCTL[@]}" -n "$ns" get "$kind.${api%%/*}" "$name" -o json 2>/dev/null || true)
+    # For apiVersion="v1" (core group) kubectl expects just the kind; for
+    # apiVersion="apps/v1" it accepts "kind.group".
+    if [[ "$api" == */* ]]; then
+        resource="$kind.${api%%/*}"
+    else
+        resource="$kind"
+    fi
+
+    # kubectl exits non-zero with a NotFound error for missing objects; stderr is
+    # suppressed and the trailing `|| true` clears the exit code, leaving
+    # `existing` empty so the branch below treats it as "source not found".
+    existing=$("${KCTL[@]}" -n "$ns" get "$resource" "$name" -o json 2>/dev/null || true)
     if [[ -z "$existing" ]]; then
         printf '%-12s %-14s %-14s %-30s %s\n' "$ns" "$api" "$kind" "$name" "skip (source not found)"
         count_skip_not_found=$((count_skip_not_found + 1))
@@ -115,7 +129,7 @@ while IFS=$'\t' read -r api kind ns name; do
 
     printf '%-12s %-14s %-14s %-30s %s\n' "$ns" "$api" "$kind" "$name" "annotate (projectable=true)"
     if $APPLY; then
-        if ! "${KCTL[@]}" -n "$ns" annotate "$kind.${api%%/*}" "$name" \
+        if ! "${KCTL[@]}" -n "$ns" annotate "$resource" "$name" \
                 "${ANNOTATION}=true" --overwrite=false >/dev/null 2>&1; then
             echo "  -> error annotating $ns/$name" >&2
             exit_code=1

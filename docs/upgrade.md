@@ -2,7 +2,7 @@
 
 This guide is for clusters already running `projection` v0.1.0-alpha.1. If you're installing for the first time, use the [getting-started guide](getting-started.md) instead.
 
-v0.2.0 introduces three user-visible changes:
+v0.2.0 introduces three breaking changes that require migration action. See the [CHANGELOG](https://github.com/be0x74a/projection/blob/main/CHANGELOG.md) for the full list of additive features shipped in the same release.
 
 1. **Source opt-in is now required by default.** The new `allowlist` source-mode ignores sources that don't carry `projection.be0x74a.io/projectable="true"`. The migration script below annotates your existing sources; alternatively you can opt into permissive mode for v0.1-compatible behavior.
 2. **Kubernetes Events moved to `events.k8s.io/v1`.** Any automation using `kubectl get events --field-selector involvedObject.name=...` against Projections must switch to the new API and field names.
@@ -99,7 +99,7 @@ Scripts, dashboards, or alerts that query Projection events need this rewrite. S
 
 ## Rolling back
 
-If something goes wrong, `helm rollback projection` returns the cluster to the previous chart revision. No custom rollback procedure is needed — the annotation migration is additive and doesn't require reverting, since v0.1.0-alpha ignores unknown annotations.
+If something goes wrong, `helm rollback projection` returns the cluster to the previous chart revision. No custom rollback procedure is needed — the annotation migration is additive and doesn't require reverting, since v0.1.0-alpha ignores unknown annotations. CRD schema changes introduced by v0.2 are not reverted by `helm rollback` (Helm does not touch CRDs on upgrade or rollback); this is safe because v0.1 ignores fields it does not recognise.
 
 ## Post-upgrade verification
 
