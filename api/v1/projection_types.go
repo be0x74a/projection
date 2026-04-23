@@ -32,11 +32,13 @@ type SourceRef struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[A-Z][A-Za-z0-9]*$`
 	Kind string `json:"kind"`
-	// Name of the source object.
+	// Name of the source object. DNS-1123 subdomain: lowercase alphanumerics,
+	// '-', and '.', up to 253 chars. Matches the permissive form Kubernetes
+	// uses for most named objects (ConfigMap, Secret, Deployment, Pod, …).
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	Name string `json:"name"`
 	// Namespace of the source object.
 	// +kubebuilder:validation:Required
@@ -62,10 +64,11 @@ type DestinationRef struct {
 	// Mutually exclusive with Namespace.
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
-	// Name in the destination namespace. Defaults to Source.Name.
+	// Name in the destination namespace. Defaults to Source.Name. DNS-1123
+	// subdomain: lowercase alphanumerics, '-', and '.', up to 253 chars.
 	// +optional
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	Name string `json:"name,omitempty"`
 }
 

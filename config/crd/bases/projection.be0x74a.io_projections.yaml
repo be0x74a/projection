@@ -62,9 +62,11 @@ spec:
                 description: Destination controls where the projected object is written.
                 properties:
                   name:
-                    description: Name in the destination namespace. Defaults to Source.Name.
-                    maxLength: 63
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    description: |-
+                      Name in the destination namespace. Defaults to Source.Name. DNS-1123
+                      subdomain: lowercase alphanumerics, '-', and '.', up to 253 chars.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   namespace:
                     description: |-
@@ -163,10 +165,13 @@ spec:
                     pattern: ^[A-Z][A-Za-z0-9]*$
                     type: string
                   name:
-                    description: Name of the source object.
-                    maxLength: 63
+                    description: |-
+                      Name of the source object. DNS-1123 subdomain: lowercase alphanumerics,
+                      '-', and '.', up to 253 chars. Matches the permissive form Kubernetes
+                      uses for most named objects (ConfigMap, Secret, Deployment, Pod, …).
+                    maxLength: 253
                     minLength: 1
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   namespace:
                     description: Namespace of the source object.
