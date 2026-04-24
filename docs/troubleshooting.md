@@ -44,7 +44,7 @@ The GVR resolved and the controller issued a `Get` against the source object, bu
 
 Typical causes, in rough order of frequency:
 
-- **RBAC.** The controller's `ServiceAccount` lacks `get` on the source Kind. The upstream install grants wildcard `group="*" resource="*"` access, so this only shows up if you have manually narrowed the `ClusterRole`. Error text includes `cannot get resource <kind> in API group <group>`.
+- **RBAC.** The controller's `ServiceAccount` lacks `get` on the source Kind. The upstream install grants wildcard `group="*" resource="*"` access by default, so this only shows up if you have narrowed RBAC — either by hand-editing the `ClusterRole` or by setting the Helm chart's [`supportedKinds`](security.md#1-narrow-the-controllers-rbac-to-the-kinds-you-actually-mirror) allowlist without including the source's Kind. Error text includes `cannot get resource <kind> in API group <group>`.
 - **Apiserver transient.** 5xx, timeout, connection reset. The controller re-queues; these clear on their own.
 - **Admission webhook intercepting `Get`.** Rare, but some validating webhooks are misconfigured to apply to `GET` verbs. Controller logs show the webhook name in the error.
 
@@ -135,7 +135,7 @@ For each target namespace, the controller first issues a `Get` to check whether 
 
 Typical causes:
 
-- **RBAC.** The controller's `ServiceAccount` lacks `get` on the destination Kind in the target namespace. Same narrowed-RBAC failure mode as [`SourceFetchFailed`](#sourcefetchfailed) — the upstream install grants wildcard access, so this only shows up if you have manually narrowed the `ClusterRole`.
+- **RBAC.** The controller's `ServiceAccount` lacks `get` on the destination Kind in the target namespace. Same narrowed-RBAC failure mode as [`SourceFetchFailed`](#sourcefetchfailed) — the upstream install grants wildcard access, so this only shows up if you have narrowed RBAC (hand-edit or chart `supportedKinds`).
 - **Apiserver transient error.** 5xx, timeout. Clears on requeue.
 
 For selector-based `Projection`s this can fire in some namespaces and not others; see [DestinationWriteFailed](#destinationwritefailed) for how the rollup reason works when failures differ per namespace.
