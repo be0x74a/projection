@@ -1466,12 +1466,20 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		}
 
 		By("the reconciler's watched-GVK map has exactly one entry for v1/ConfigMap (idempotent registration)")
+		// Filter by GroupKind rather than asserting len(sharedR.watched) == 1:
+		// sharedR accumulates watches across specs in this Ordered block, so a
+		// future spec that adds a different source GVK would regress a total-count
+		// assertion. The invariant under test here is "one entry per GroupKind".
 		sharedR.watchedMu.Lock()
-		entries := len(sharedR.watched)
-		_, hasCM := sharedR.watched[schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}]
+		var cmCount int
+		for gvk := range sharedR.watched {
+			if gvk.Group == "" && gvk.Kind == "ConfigMap" {
+				cmCount++
+			}
+		}
 		sharedR.watchedMu.Unlock()
-		Expect(entries).To(Equal(1), "expected exactly one registered watch; got %d", entries)
-		Expect(hasCM).To(BeTrue(), "ConfigMap GVK not in watched map")
+		Expect(cmCount).To(Equal(1),
+			"expected exactly one v1/ConfigMap watch; got %d", cmCount)
 
 		By("updating the source — both destinations reflect the change via the shared watch")
 		updated := &corev1.ConfigMap{}
@@ -1556,6 +1564,10 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		}
 
 		By("apps/v1/Deployment has exactly one watch entry (pinned + unpinned share)")
+		// Scoped count — sharedR.watched accumulates watches across specs in this
+		// Ordered block (the preceding ConfigMap spec registered its own entry).
+		// Filter by GroupKind so the invariant under test ("pinned+unpinned share
+		// a single watch") is isolated from unrelated entries.
 		sharedR.watchedMu.Lock()
 		var appsDeployCount int
 		for gvk := range sharedR.watched {
