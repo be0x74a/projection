@@ -161,10 +161,13 @@ func (r *ProjectionReconciler) emit(proj *projectionv1.Projection, eventType, re
 }
 
 // sourceKey is the canonical string key identifying a source object across
-// both the field indexer and the event-mapping function. Keeping one helper
-// ensures the two sides can never drift.
-func sourceKey(apiVersion, kind, namespace, name string) string {
-	return apiVersion + "/" + kind + "/" + namespace + "/" + name
+// both the field indexer and the event-mapping function. The version is
+// intentionally omitted: source events always carry a resolved GVK, but a
+// Projection may reference its source via an unpinned form (e.g. apps/*).
+// Joining on (group, kind, namespace, name) keeps both sides in agreement
+// regardless of which served version the apiserver delivered the event for.
+func sourceKey(group, kind, namespace, name string) string {
+	return group + "/" + kind + "/" + namespace + "/" + name
 }
 
 // benchStampAnnotation is the annotation the projection benchmark harness
@@ -479,7 +482,7 @@ func (r *ProjectionReconciler) ensureWatch(gvk schema.GroupVersionKind) error {
 // lets us do this with a single cached List.
 func (r *ProjectionReconciler) mapSource(ctx context.Context, obj client.Object) []reconcile.Request {
 	gvk := obj.GetObjectKind().GroupVersionKind()
-	key := sourceKey(gvk.GroupVersion().String(), gvk.Kind, obj.GetNamespace(), obj.GetName())
+	key := sourceKey(gvk.Group, gvk.Kind, obj.GetNamespace(), obj.GetName())
 	var list projectionv1.ProjectionList
 	if err := r.List(ctx, &list, client.MatchingFields{sourceIndex: key}); err != nil {
 		log.FromContext(ctx).Error(err, "listing projections by source index", "key", key)
@@ -1002,8 +1005,15 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if !ok {
 				return nil
 			}
+			gv, err := schema.ParseGroupVersion(p.Spec.Source.APIVersion)
+			if err != nil {
+				// Malformed apiVersion — admission should reject this, but if it
+				// ever slips through, indexing under "" rather than panicking
+				// keeps the controller alive. Reconcile will surface the error.
+				return nil
+			}
 			return []string{sourceKey(
-				p.Spec.Source.APIVersion,
+				gv.Group,
 				p.Spec.Source.Kind,
 				p.Spec.Source.Namespace,
 				p.Spec.Source.Name,
