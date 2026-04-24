@@ -268,10 +268,17 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Register a watch on this source GVK if we haven't seen it before, so
 	// subsequent edits to the source enqueue this (and any other) Projection
-	// pointing at it instead of waiting for the next periodic requeue.
-	gv, _ := schema.ParseGroupVersion(proj.Spec.Source.APIVersion)
-	if err := r.ensureWatch(gv.WithKind(proj.Spec.Source.Kind)); err != nil {
-		logger.Error(err, "registering source watch", "gvk", gv.WithKind(proj.Spec.Source.Kind))
+	// pointing at it instead of waiting for the next periodic requeue. Key
+	// the watch on the *resolved* version (not the unpinned apiVersion the
+	// user supplied) so pinned (apps/v1) and unpinned (apps/*) Projections
+	// targeting the same Kind share a single watch entry.
+	watchGVK := schema.GroupVersionKind{
+		Group:   gvr.Group,
+		Version: resolvedVersion,
+		Kind:    proj.Spec.Source.Kind,
+	}
+	if err := r.ensureWatch(watchGVK); err != nil {
+		logger.Error(err, "registering source watch", "gvk", watchGVK)
 		// Don't fail the reconcile: the periodic-requeue-on-error path below
 		// still keeps us alive, and a future reconcile will retry the watch.
 	}
