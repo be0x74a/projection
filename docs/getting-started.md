@@ -104,11 +104,12 @@ metadata:
     projection.be0x74a.io/owned-by: default/app-config-to-tenant-a
 ```
 
-## Mirroring a CRD: prefer `apps/*`
+## Sources outside the core group: prefer `<group>/*`
 
-The ConfigMap example above uses `apiVersion: v1` — core group, pinned version.
-Core Kubernetes versions are stable, so pinning is fine there. For **CRD
-sources**, reach for the unpinned form instead:
+The ConfigMap example above uses `apiVersion: v1` — core group, pinned
+version. Core Kubernetes versions are stable, so pinning is fine there. For
+sources in any **named group** — built-ins like `apps`, `networking.k8s.io`,
+or your own CRDs at `example.com` — reach for the unpinned form instead:
 
 ```yaml
 apiVersion: projection.be0x74a.io/v1
@@ -127,10 +128,11 @@ spec:
 ```
 
 The `*` sentinel tells the controller to resolve the preferred served version
-via the `RESTMapper` on every reconcile. When a CRD author promotes
-`v1beta1` → `v1` and stops serving `v1beta1`, the projection picks up the new
-version automatically on the next reconcile rather than failing with
-`SourceResolutionFailed` and garbage-collecting the destination.
+via the `RESTMapper` on every reconcile. The benefit is most visible against
+**CRD sources**: when a CRD author promotes `v1beta1` → `v1` and stops serving
+`v1beta1`, the projection picks up the new version automatically on the next
+reconcile rather than failing with `SourceResolutionFailed` and
+garbage-collecting the destination.
 
 As with the ConfigMap example above, the source Deployment must carry
 `projection.be0x74a.io/projectable: "true"` if the controller is running in
@@ -145,9 +147,10 @@ kubectl get projection my-deployment-mirror \
 # → resolved apps/Deployment to preferred version v1
 ```
 
-Pinning (`apps/v1`) is still available when you want an explicit stability
-anchor, e.g. while validating a new CRD version. There is no unpinned form for
-the core group — `v1` is the only form accepted there.
+Pinning (e.g. `apps/v1`, `example.com/v1beta1`) is still available when you
+want an explicit stability anchor — useful while validating a new CRD version,
+or to deliberately fall behind. There is no unpinned form for the core group
+— `v1` is the only form accepted there.
 
 ## Watch propagation
 
