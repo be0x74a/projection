@@ -5,13 +5,20 @@ metadata:
   labels:
     {{- include "projection.labels" . | nindent 4 }}
 rules:
-  # Projection mirrors arbitrary Kubernetes resources across namespaces, so it
-  # needs full read/write access to any Kind the user configures as source or
-  # destination. Narrow this down in downstream deployments if possible.
+  {{- /*
+      User-configured supportedKinds rules. Empty list produces no entries
+      here; the operator can still reconcile Projection CRs (rules below)
+      but cannot read or write any other Kind. See docs/security.md.
+  */}}
+  {{- range .Values.supportedKinds }}
+  {{- if not (hasKey . "apiGroup") }}{{ fail "supportedKinds entries require an apiGroup (use \"\" for the core group)" }}{{- end }}
+  {{- if not (hasKey . "resources") }}{{ fail "supportedKinds entries require a resources list" }}{{- end }}
   - apiGroups:
-      - '*'
+      - {{ .apiGroup | quote }}
     resources:
-      - '*'
+    {{- range .resources }}
+      - {{ . | quote }}
+    {{- end }}
     verbs:
       - create
       - delete
@@ -20,6 +27,7 @@ rules:
       - patch
       - update
       - watch
+  {{- end }}
   - apiGroups:
       - projection.be0x74a.io
     resources:

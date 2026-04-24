@@ -4,6 +4,7 @@ templates:
   - networkpolicy.yaml
   - poddisruptionbudget.yaml
   - deployment.yaml
+  - clusterrole.yaml
 
 tests:
   - it: renders no ServiceMonitor by default
@@ -113,3 +114,95 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].args
           content: --leader-election-lease-duration=15s
+
+  - it: renders default broad-wildcard ClusterRole rule
+    template: clusterrole.yaml
+    asserts:
+      - isKind:
+          of: ClusterRole
+      # The first rule is the user-configurable range output. With the
+      # default values (single wildcard entry), it matches the pre-v0.2
+      # hand-written */* rule 1:1.
+      - equal:
+          path: rules[0].apiGroups
+          value: ["*"]
+      - equal:
+          path: rules[0].resources
+          value: ["*"]
+      - equal:
+          path: rules[0].verbs
+          value: [create, delete, get, list, patch, update, watch]
+      # Projection-own rules are still present (unchanged).
+      - equal:
+          path: rules[1].apiGroups
+          value: [projection.be0x74a.io]
+      - equal:
+          path: rules[1].resources
+          value: [projections]
+
+  - it: renders no broad rule when supportedKinds is empty
+    template: clusterrole.yaml
+    set:
+      supportedKinds: []
+    asserts:
+      - isKind:
+          of: ClusterRole
+      # First rule is now the projection.be0x74a.io rule — no broad entry.
+      - equal:
+          path: rules[0].apiGroups
+          value: [projection.be0x74a.io]
+      - equal:
+          path: rules[0].resources
+          value: [projections]
+      # Three rules total (3 own-rules, 0 user-config rules).
+      - lengthEqual:
+          path: rules
+          count: 3
+
+  - it: renders narrow ClusterRole rules from supportedKinds
+    template: clusterrole.yaml
+    set:
+      supportedKinds:
+        - apiGroup: ""
+          resources: [configmaps, secrets]
+        - apiGroup: apps
+          resources: [deployments]
+    asserts:
+      - isKind:
+          of: ClusterRole
+      - lengthEqual:
+          path: rules
+          count: 5
+      - equal:
+          path: rules[0].apiGroups
+          value: [""]
+      - equal:
+          path: rules[0].resources
+          value: [configmaps, secrets]
+      - equal:
+          path: rules[1].apiGroups
+          value: [apps]
+      - equal:
+          path: rules[1].resources
+          value: [deployments]
+      # Own-rules remain in position 2, 3, 4.
+      - equal:
+          path: rules[2].apiGroups
+          value: [projection.be0x74a.io]
+
+  - it: renders wildcard resources for a trusted apiGroup
+    template: clusterrole.yaml
+    set:
+      supportedKinds:
+        - apiGroup: projection.be0x74a.io
+          resources: ["*"]
+    asserts:
+      - equal:
+          path: rules[0].apiGroups
+          value: [projection.be0x74a.io]
+      - equal:
+          path: rules[0].resources
+          value: ["*"]
+      - lengthEqual:
+          path: rules
+          count: 4

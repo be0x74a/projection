@@ -29,31 +29,84 @@ Note this is a **policy** control, not an isolation boundary (the controller sti
 
 ### 1. Narrow the controller's RBAC to the Kinds you actually mirror
 
-If you only ever project `ConfigMap` and `Secret`, replace the stock ClusterRole with a narrowed one. Example:
+The chart ships a `supportedKinds` value that narrows the operator's ClusterRole from the default `*/*` to an explicit allowlist. Every entry becomes a discrete RBAC rule with the full verb set (get, list, watch, create, update, patch, delete — a Projection needs both read on its source and write on its destination).
+
+**Strict — read+write for two core-group Kinds:**
 
 ```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: projection-manager
-rules:
-  - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["projection.be0x74a.io"]
-    resources: ["projections"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["projection.be0x74a.io"]
-    resources: ["projections/status"]
-    verbs: ["get", "update", "patch"]
-  - apiGroups: ["projection.be0x74a.io"]
-    resources: ["projections/finalizers"]
-    verbs: ["update"]
+# values.yaml
+supportedKinds:
+  - apiGroup: ""
+    resources: [configmaps, secrets]
 ```
 
-A Projection referencing any other Kind will then fail with `SourceResolutionFailed` or `SourceFetchFailed`, which is the correct outcome — it's cluster policy, not silent behavior.
+**Moderate — any resource in a trusted group** (useful when your cluster defines custom CRDs under a single group):
 
-The stock chart accepts an override for the controller ClusterRole; see the chart `values.yaml` `rbac.clusterRoleRules` field.
+```yaml
+supportedKinds:
+  - apiGroup: projection.be0x74a.io
+    resources: ["*"]
+```
+
+**Default** (preserves pre-v0.2 behavior — equivalent to the stock `*/*` ClusterRole):
+
+```yaml
+supportedKinds:
+  - apiGroup: "*"
+    resources: ["*"]
+```
+
+**Disable entirely** — the operator can reconcile its own `Projection` CRs but cannot read or write any other Kind. A Projection targeting an external Kind fails with `SourceResolved=False reason=SourceFetchFailed` (`forbidden`):
+
+```yaml
+supportedKinds: []
+```
+
+#### Wildcard semantics
+
+`*` is allowed in both `apiGroup` and `resources`, with the conventional RBAC meaning:
+
+| Entry | Grants |
+| --- | --- |
+| `apiGroup: ""` / `resources: [configmaps]` | ConfigMap in the core group only |
+| `apiGroup: "*"` / `resources: ["*"]` | Every resource in every group (equivalent to the default) |
+| `apiGroup: projection.be0x74a.io` / `resources: ["*"]` | Every resource in the `projection.be0x74a.io` group |
+| `supportedKinds: []` | Nothing beyond the operator's own `Projection` CRs |
+
+Note the subtle distinction: `apiGroup: ""` means the **core API group only** (ConfigMap, Secret, Pod, …), while `apiGroup: "*"` means **every group including core**.
+
+#### Choosing an allowlist
+
+1. Enumerate the Kinds currently projected in your cluster:
+
+   ```bash
+   kubectl get projections -A -o json \
+     | jq -r '.items[].spec.source | "\(.apiVersion) \(.kind)"' \
+     | sort -u
+   ```
+
+2. Look up each Kind's plural resource name and API group:
+
+   ```bash
+   kubectl api-resources | grep <Kind>
+   ```
+
+3. Populate `supportedKinds` with one entry per API group, listing the plural resource names.
+
+4. Deploy and verify:
+
+   ```bash
+   helm upgrade projection oci://ghcr.io/be0x74a/charts/projection -f values.yaml
+   kubectl auth can-i get configmaps \
+     --as=system:serviceaccount:projection-system:projection
+   ```
+
+#### Trade-offs
+
+- **Audit-ready ClusterRole** — reviewers see exactly which Kinds the operator can touch.
+- **Defense in depth** — a rogue Projection cannot target a high-privilege Kind (`Secret` in an unrelated namespace, say) unless you have explicitly allowlisted it.
+- **Adding a new projectable Kind requires a chart redeploy.** Acceptable in regulated environments where chart changes go through change-management anyway.
+- **`forbidden` errors have two causes** — narrowed RBAC or a genuinely missing resource. See [troubleshooting.md](troubleshooting.md#sourcefetchfailed) for the diagnostic path.
 
 ### 2. Restrict who can create `Projection` CRs in which namespaces
 
