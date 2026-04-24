@@ -148,7 +148,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | APIVersion of the source object, e.g. "v1" or "apps/v1". |  | MinLength: 1 <br />Pattern: `^([a-z0-9.-]+/)?v[0-9]+((alpha\|beta)[0-9]+)?$` <br />Required: \{\} <br /> |
+| `apiVersion` _string_ | APIVersion of the source object. Three forms accepted:<br />  - "v1"      — core group, pinned to v1.<br />  - "apps/v1" — named group, pinned to v1.<br />  - "apps/*"  — named group, RESTMapper-preferred served version.<br />The unpinned form follows the cluster: when a CRD author promotes<br />v1beta1→v1, projection picks up the new preferred version on the<br />next reconcile rather than reporting SourceResolutionFailed.<br />The "*" sentinel is invalid without a group prefix (no "*" form<br />for the core group, which has stable versions); enforced in the<br />reconciler since the regex is permissive for simplicity. |  | MinLength: 1 <br />Pattern: `^([a-z0-9.-]+/)?(v[0-9]+((alpha\|beta)[0-9]+)?\|\*)$` <br />Required: \{\} <br /> |
 | `kind` _string_ | Kind of the source object, e.g. "ConfigMap". |  | MinLength: 1 <br />Pattern: `^[A-Z][A-Za-z0-9]*$` <br />Required: \{\} <br /> |
 | `name` _string_ | Name of the source object. DNS-1123 subdomain: lowercase alphanumerics,<br />'-', and '.', up to 253 chars. Matches the permissive form Kubernetes<br />uses for most named objects (ConfigMap, Secret, Deployment, Pod, …). |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Required: \{\} <br /> |
 | `namespace` _string_ | Namespace of the source object. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
