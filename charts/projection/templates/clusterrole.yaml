@@ -11,6 +11,8 @@ rules:
       but cannot read or write any other Kind. See docs/security.md.
   */}}
   {{- range .Values.supportedKinds }}
+  {{- if not (hasKey . "apiGroup") }}{{ fail "supportedKinds entries require an apiGroup (use \"\" for the core group)" }}{{- end }}
+  {{- if not (hasKey . "resources") }}{{ fail "supportedKinds entries require a resources list" }}{{- end }}
   - apiGroups:
       - {{ .apiGroup | quote }}
     resources:

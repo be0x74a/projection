@@ -129,15 +129,9 @@ tests:
       - equal:
           path: rules[0].resources
           value: ["*"]
-      - contains:
+      - equal:
           path: rules[0].verbs
-          content: create
-      - contains:
-          path: rules[0].verbs
-          content: watch
-      - contains:
-          path: rules[0].verbs
-          content: delete
+          value: [create, delete, get, list, patch, update, watch]
       # Projection-own rules are still present (unchanged).
       - equal:
           path: rules[1].apiGroups
