@@ -135,3 +135,61 @@ func TestResolveGVRPreferredVersion(t *testing.T) {
 		}
 	})
 }
+
+func TestResolvedVersionMessage(t *testing.T) {
+	cases := []struct {
+		name            string
+		apiVersion      string
+		kind            string
+		resolvedVersion string
+		want            string
+	}{
+		{
+			name:            "unpinned with resolved version",
+			apiVersion:      "apps/*",
+			kind:            "Deployment",
+			resolvedVersion: "v1",
+			want:            "resolved apps/Deployment to preferred version v1",
+		},
+		{
+			name:       "pinned returns empty",
+			apiVersion: "apps/v1",
+			kind:       "Deployment",
+			// resolvedVersion unused for pinned forms
+			want: "",
+		},
+		{
+			name:       "core pinned returns empty",
+			apiVersion: "v1",
+			kind:       "ConfigMap",
+			want:       "",
+		},
+		{
+			name:            "unpinned with empty resolvedVersion returns empty",
+			apiVersion:      "apps/*",
+			kind:            "Deployment",
+			resolvedVersion: "",
+			// Guards against failDestination calls that happen before
+			// resolveGVR runs (e.g. InvalidSpec mutex violation).
+			want: "",
+		},
+		{
+			name:       "malformed apiVersion returns empty",
+			apiVersion: "apps//v1",
+			kind:       "Deployment",
+			want:       "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolvedVersionMessage(projectionv1.SourceRef{
+				APIVersion: tc.apiVersion,
+				Kind:       tc.kind,
+			}, tc.resolvedVersion)
+			if got != tc.want {
+				t.Errorf("resolvedVersionMessage(%q, %q) = %q, want %q",
+					tc.apiVersion, tc.resolvedVersion, got, tc.want)
+			}
+		})
+	}
+}

@@ -176,7 +176,10 @@ func sourceKey(group, kind, namespace, name string) string {
 // to preserve today's empty-message behavior.
 func resolvedVersionMessage(src projectionv1.SourceRef, resolvedVersion string) string {
 	gv, err := schema.ParseGroupVersion(src.APIVersion)
-	if err != nil || gv.Version != "*" {
+	// resolvedVersion == "" means failDestination was called before
+	// resolveGVR ran (e.g. from the InvalidSpec mutex-violation path);
+	// there's no version to report yet.
+	if err != nil || gv.Version != "*" || resolvedVersion == "" {
 		return ""
 	}
 	return fmt.Sprintf("resolved %s/%s to preferred version %s",
