@@ -104,6 +104,47 @@ metadata:
     projection.be0x74a.io/owned-by: default/app-config-to-tenant-a
 ```
 
+## Mirroring a CRD: prefer `apps/*`
+
+The ConfigMap example above uses `apiVersion: v1` — core group, pinned version.
+Core Kubernetes versions are stable, so pinning is fine there. For **CRD
+sources**, reach for the unpinned form instead:
+
+```yaml
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  name: my-deployment-mirror
+  namespace: default
+spec:
+  source:
+    apiVersion: apps/*         # RESTMapper-preferred served version
+    kind: Deployment
+    name: my-app
+    namespace: source-ns
+  destination:
+    namespace: dest-ns
+```
+
+The `*` sentinel tells the controller to resolve the preferred served version
+via the `RESTMapper` on every reconcile. When a CRD author promotes
+`v1beta1` → `v1` and stops serving `v1beta1`, the projection picks up the new
+version automatically on the next reconcile rather than failing with
+`SourceResolutionFailed` and garbage-collecting the destination.
+
+The resolved version is reported in the `SourceResolved` condition message,
+so you can always see which version your projection is currently on:
+
+```bash
+kubectl describe projection my-deployment-mirror \
+  | grep -A2 SourceResolved
+# → Message: resolved apps/Deployment to preferred version v1
+```
+
+Pinning (`apps/v1`) is still available when you want an explicit stability
+anchor, e.g. while validating a new CRD version. There is no unpinned form for
+the core group — `v1` is the only form accepted there.
+
 ## Watch propagation
 
 Edit the source and watch the destination update almost immediately:

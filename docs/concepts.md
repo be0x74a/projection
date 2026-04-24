@@ -17,6 +17,24 @@ spec:
 
 All four fields are required and pattern-validated at admission time — typos fail at `kubectl apply`, not at runtime. `apiVersion` + `kind` are resolved through the apiserver's `RESTMapper`, so anything the cluster knows about works: built-ins, aggregated APIs, CRDs.
 
+### Pinned vs. preferred version
+
+`source.apiVersion` accepts three forms:
+
+| Form       | Semantics                                               |
+| ---------- | ------------------------------------------------------- |
+| `v1`       | Core group, pinned to v1.                               |
+| `apps/v1`  | Named group, pinned to v1.                              |
+| `apps/*`   | Named group, RESTMapper-preferred served version.       |
+
+**Pinned** is an explicit stability anchor: useful when you're mid-migration and want to lock the projection to a specific version while you validate behavior, or when you intentionally need to fall behind a CRD upgrade.
+
+**Preferred** (`apps/*`) is the default recommendation for CRD sources. It follows the cluster: when a CRD author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than failing with `SourceResolutionFailed` and garbage-collecting your destinations.
+
+The resolved version is reported in the `SourceResolved` condition message (`kubectl describe projection`), so you can always answer "which version is this currently on?" without operator log access.
+
+The core group does not have an unpinned form — its versions are stable.
+
 ## 2. Destination
 
 The destination says where to write the copy. There are two shapes:
