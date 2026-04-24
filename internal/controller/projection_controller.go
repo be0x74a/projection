@@ -170,6 +170,19 @@ func sourceKey(group, kind, namespace, name string) string {
 	return group + "/" + kind + "/" + namespace + "/" + name
 }
 
+// resolvedVersionMessage produces the human-readable SourceResolved
+// condition message when a Projection used the unpinned form (apps/*) and
+// the RESTMapper picked a concrete version. Returns "" for pinned sources
+// to preserve today's empty-message behavior.
+func resolvedVersionMessage(src projectionv1.SourceRef, resolvedVersion string) string {
+	gv, err := schema.ParseGroupVersion(src.APIVersion)
+	if err != nil || gv.Version != "*" {
+		return ""
+	}
+	return fmt.Sprintf("resolved %s/%s to preferred version %s",
+		gv.Group, src.Kind, resolvedVersion)
+}
+
 // benchStampAnnotation is the annotation the projection benchmark harness
 // writes on source objects to measure end-to-end propagation latency. Value
 // is a unix-nano timestamp. Presence of the annotation triggers a per-phase
@@ -242,10 +255,10 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if proj.Spec.Destination.Namespace != "" && proj.Spec.Destination.NamespaceSelector != nil {
 		msg := "destination.namespace and destination.namespaceSelector are mutually exclusive"
 		r.emit(proj, corev1.EventTypeWarning, "InvalidSpec", "Validate", msg)
-		return r.failDestination(ctx, proj, "InvalidSpec", msg)
+		return r.failDestination(ctx, proj, "", "InvalidSpec", msg)
 	}
 
-	gvr, _, err := r.resolveGVR(proj.Spec.Source)
+	gvr, resolvedVersion, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		return r.failSource(ctx, proj, "SourceResolutionFailed", "Resolve", err.Error())
 	}
@@ -285,7 +298,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	destNamespaces, err := r.resolveDestinationNamespaces(ctx, proj)
 	if err != nil {
 		r.emit(proj, corev1.EventTypeWarning, "NamespaceResolutionFailed", "Resolve", err.Error())
-		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", err.Error())
+		return r.failDestination(ctx, proj, resolvedVersion, "NamespaceResolutionFailed", err.Error())
 	}
 
 	var failures []nsFailure
@@ -355,10 +368,10 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if len(failures) > 1 {
 			msg = fmt.Sprintf("failed namespaces: %s", strings.Join(nsList, ", "))
 		}
-		return r.failDestination(ctx, proj, reason, msg)
+		return r.failDestination(ctx, proj, resolvedVersion, reason, msg)
 	}
 
-	if err := r.markAllReady(ctx, proj); err != nil {
+	if err := r.markAllReady(ctx, proj, resolvedVersion); err != nil {
 		return ctrl.Result{}, err
 	}
 	logBenchStampLatency(ctx, source, "reconcile-end")
@@ -856,8 +869,9 @@ func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv
 // (which has already fired per-namespace events in the fan-out loop) from
 // double-emitting, which the client-go events broadcaster would otherwise
 // aggregate into a record that drops the action field.
-func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, reason, msg string) (ctrl.Result, error) {
-	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", "")
+func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, resolvedVersion, reason, msg string) (ctrl.Result, error) {
+	srMsg := resolvedVersionMessage(proj.Spec.Source, resolvedVersion)
+	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", srMsg)
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionFalse, reason, msg)
 	setCondition(proj, conditionReady, metav1.ConditionFalse, reason, msg)
 	switch reason {
@@ -873,8 +887,9 @@ func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projec
 }
 
 // markAllReady flips all three conditions to True in a single status update.
-func (r *ProjectionReconciler) markAllReady(ctx context.Context, proj *projectionv1.Projection) error {
-	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", "")
+func (r *ProjectionReconciler) markAllReady(ctx context.Context, proj *projectionv1.Projection, resolvedVersion string) error {
+	msg := resolvedVersionMessage(proj.Spec.Source, resolvedVersion)
+	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", msg)
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionTrue, "Projected", "")
 	setCondition(proj, conditionReady, metav1.ConditionTrue, "Projected", "")
 	if err := r.Status().Update(ctx, proj); err != nil {
