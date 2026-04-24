@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/be0x74a/projection/actions/workflows/ci.yml/badge.svg)](https://github.com/be0x74a/projection/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/be0x74a/projection?include_prereleases&sort=semver)](https://github.com/be0x74a/projection/releases)
+[![API](https://img.shields.io/badge/API-v1-blue)](docs/api-stability.md)
 [![Go Report Card](https://goreportcard.com/badge/github.com/be0x74a/projection)](https://goreportcard.com/report/github.com/be0x74a/projection)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/be0x74a/projection/badge)](https://scorecard.dev/viewer/?uri=github.com/be0x74a/projection)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12533/badge)](https://www.bestpractices.dev/projects/12533)

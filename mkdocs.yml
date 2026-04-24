@@ -48,6 +48,7 @@ nav:
   - Concepts: concepts.md
   - CRD behavior: crd-reference.md
   - API reference: api-reference.md
+  - API stability: api-stability.md
   - Use cases: use-cases.md
   - vs alternatives: comparison.md
   - Observability: observability.md
