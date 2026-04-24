@@ -61,7 +61,7 @@ func TestResolveGVRRejectsClusterScoped(t *testing.T) {
 	r := &ProjectionReconciler{RESTMapper: mapper}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := r.resolveGVR(tc.src)
+			_, _, err := r.resolveGVR(tc.src)
 			if tc.wantErr && err == nil {
 				t.Fatal("expected error, got nil")
 			}

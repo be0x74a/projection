@@ -245,7 +245,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.failDestination(ctx, proj, "InvalidSpec", msg)
 	}
 
-	gvr, err := r.resolveGVR(proj.Spec.Source)
+	gvr, _, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		return r.failSource(ctx, proj, "SourceResolutionFailed", "Resolve", err.Error())
 	}
@@ -498,14 +498,20 @@ func (r *ProjectionReconciler) mapSource(ctx context.Context, obj client.Object)
 	return reqs
 }
 
-func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.GroupVersionResource, error) {
+// resolveGVR maps a SourceRef's apiVersion+kind to a concrete GVR via the
+// cached RESTMapper. The second return value is the version the RESTMapper
+// picked — equal to gv.Version when the user pinned a version, or the
+// preferred served version when unpinned (gv.Version == "*"). Callers
+// surface the resolved version in the SourceResolved condition message
+// for operator-visibility.
+func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.GroupVersionResource, string, error) {
 	gv, err := schema.ParseGroupVersion(src.APIVersion)
 	if err != nil {
-		return schema.GroupVersionResource{}, fmt.Errorf("parsing apiVersion %q: %w", src.APIVersion, err)
+		return schema.GroupVersionResource{}, "", fmt.Errorf("parsing apiVersion %q: %w", src.APIVersion, err)
 	}
 	mapping, err := r.RESTMapper.RESTMapping(schema.GroupKind{Group: gv.Group, Kind: src.Kind}, gv.Version)
 	if err != nil {
-		return schema.GroupVersionResource{}, fmt.Errorf("resolving %s/%s: %w", src.APIVersion, src.Kind, err)
+		return schema.GroupVersionResource{}, "", fmt.Errorf("resolving %s/%s: %w", src.APIVersion, src.Kind, err)
 	}
 	// Projection only mirrors namespaced resources. Cluster-scoped Kinds
 	// (Namespace, ClusterRole, StorageClass, CRDs, PriorityClass, ...)
@@ -515,15 +521,15 @@ func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.Gr
 	// a nonsensical URL that the apiserver 404s on). Fail fast with a
 	// clear message rather than surfacing the 404 downstream.
 	if mapping.Scope.Name() != apimeta.RESTScopeNameNamespace {
-		return schema.GroupVersionResource{}, fmt.Errorf(
+		return schema.GroupVersionResource{}, "", fmt.Errorf(
 			"%s/%s is cluster-scoped; projection only mirrors namespaced resources",
 			src.APIVersion, src.Kind)
 	}
-	return mapping.Resource, nil
+	return mapping.Resource, mapping.GroupVersionKind.Version, nil
 }
 
 func (r *ProjectionReconciler) deleteDestination(ctx context.Context, proj *projectionv1.Projection) error {
-	gvr, err := r.resolveGVR(proj.Spec.Source)
+	gvr, _, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		// Source Kind no longer resolves — we can't locate the destination.
 		// Proceed with finalizer removal rather than blocking forever.
