@@ -1,0 +1,274 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: projections.projection.be0x74a.io
+spec:
+  group: projection.be0x74a.io
+  names:
+    kind: Projection
+    listKind: ProjectionList
+    plural: projections
+    shortNames:
+    - proj
+    singular: projection
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.source.kind
+      name: Kind
+      type: string
+    - jsonPath: .spec.source.namespace
+      name: Source-Namespace
+      type: string
+    - jsonPath: .spec.source.name
+      name: Source-Name
+      type: string
+    - jsonPath: .spec.destination.name
+      name: Destination
+      type: string
+    - jsonPath: .spec.destination.namespaceSelector.matchLabels
+      name: Destination-Selector
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Projection mirrors one Kubernetes object from a source location to one or
+          more destination namespaces, declaratively and conflict-safely. Source
+          edits propagate to destinations in ~100 ms via dynamic watches. Destinations
+          carry a projection.be0x74a.io/owned-by annotation the controller uses to
+          refuse overwriting resources it did not create.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ProjectionSpec specifies which source object to mirror, where to write it,
+              and what metadata overlays to apply.
+            properties:
+              destination:
+                description: Destination controls where the projected object is written.
+                properties:
+                  name:
+                    description: |-
+                      Name in the destination namespace. Defaults to Source.Name. DNS-1123
+                      subdomain: lowercase alphanumerics, '-', and '.', up to 253 chars.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace to project into. Defaults to the Projection's own namespace.
+                      Mutually exclusive with NamespaceSelector.
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  namespaceSelector:
+                    description: |-
+                      NamespaceSelector selects namespaces to project into by label.
+                      Mutually exclusive with Namespace.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+                x-kubernetes-validations:
+                - message: destination.namespace and destination.namespaceSelector
+                    are mutually exclusive
+                  rule: '!(has(self.namespace) && has(self.namespaceSelector))'
+              overlay:
+                description: Overlay applies metadata patches on top of the projected
+                  object.
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Annotations are merged with the source object's metadata.annotations
+                      before writing to the destination. Keys set here win on conflict
+                      with source annotations. Note: the controller always overwrites
+                      projection.be0x74a.io/owned-by to its own bookkeeping value;
+                      attempts to set it here are ignored.
+                    type: object
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Labels are merged with the source object's metadata.labels before
+                      writing to the destination. Keys set here win on conflict with
+                      source labels.
+                    type: object
+                type: object
+              source:
+                description: Source is the object to project from.
+                properties:
+                  apiVersion:
+                    description: APIVersion of the source object, e.g. "v1" or "apps/v1".
+                    minLength: 1
+                    pattern: ^([a-z0-9.-]+/)?v[0-9]+((alpha|beta)[0-9]+)?$
+                    type: string
+                  kind:
+                    description: Kind of the source object, e.g. "ConfigMap".
+                    minLength: 1
+                    pattern: ^[A-Z][A-Za-z0-9]*$
+                    type: string
+                  name:
+                    description: |-
+                      Name of the source object. DNS-1123 subdomain: lowercase alphanumerics,
+                      '-', and '.', up to 253 chars. Matches the permissive form Kubernetes
+                      uses for most named objects (ConfigMap, Secret, Deployment, Pod, …).
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  namespace:
+                    description: Namespace of the source object.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                - namespace
+                type: object
+            required:
+            - source
+            type: object
+          status:
+            description: |-
+              ProjectionStatus reports the most recent reconcile outcome via three
+              conditions: SourceResolved, DestinationWritten, and Ready.
+            properties:
+              conditions:
+                description: |-
+                  Conditions reflect the current state of the projection. The controller
+                  sets type "Ready" to True once the destination has been written, or
+                  False with a reason describing why not.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
