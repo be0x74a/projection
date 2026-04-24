@@ -26,14 +26,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	projectionv1 "github.com/be0x74a/projection/api/v1"
 )
-
-// ptrBool returns a pointer to the given bool. Used for CRD schema fields
-// that take *bool (e.g. XPreserveUnknownFields).
-func ptrBool(b bool) *bool { return &b }
 
 // widgetCRD is a two-version (v1alpha1 + v1, both served, conversion=None,
 // storage=v1) custom CRD we install at test time to exercise the
@@ -49,7 +46,7 @@ func widgetCRD() *apiextensionsv1.CustomResourceDefinition {
 		Properties: map[string]apiextensionsv1.JSONSchemaProps{
 			"spec": {
 				Type:                   "object",
-				XPreserveUnknownFields: ptrBool(true),
+				XPreserveUnknownFields: ptr.To(true),
 			},
 		},
 	}
