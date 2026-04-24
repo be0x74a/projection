@@ -45,7 +45,7 @@ spec:
         description: |-
           Projection mirrors one Kubernetes object from a source location to one or
           more destination namespaces, declaratively and conflict-safely. Source
-          edits propagate to destinations in ~100ms via dynamic watches. Destinations
+          edits propagate to destinations in ~100 ms via dynamic watches. Destinations
           carry a projection.be0x74a.io/owned-by annotation the controller uses to
           refuse overwriting resources it did not create.
         properties:

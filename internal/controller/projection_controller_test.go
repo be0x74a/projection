@@ -1440,17 +1440,14 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 	})
 
 	It("accepts and reconciles a source whose name contains a dot (Finding C regression)", func() {
-		ctx := context.Background()
-		sourceNS := "fc-src-" + nextID()
-		destNS := "fc-dst-" + nextID()
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: sourceNS}})).To(Succeed())
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: destNS}})).To(Succeed())
-		defer func() {
-			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: sourceNS}})
-			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: destNS}})
-		}()
+		sourceNS := uniqueNS("fc-src")
+		destNS := uniqueNS("fc-dst")
+		ensureNamespace(sourceNS)
+		ensureNamespace(destNS)
 
 		const dottedName = "app.config-v2"
+		projKey := types.NamespacedName{Name: "finding-c-" + nextID(), Namespace: sourceNS}
+		DeferCleanup(deleteProjection, projKey)
 
 		// Source ConfigMap with a name containing a dot — valid Kubernetes
 		// subdomain, would have been rejected by admission under the v0.1
@@ -1470,8 +1467,8 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		// subdomain-format name.
 		proj := &projectionv1.Projection{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "finding-c-" + nextID(),
-				Namespace: sourceNS,
+				Name:      projKey.Name,
+				Namespace: projKey.Namespace,
 			},
 			Spec: projectionv1.ProjectionSpec{
 				Source: projectionv1.SourceRef{
@@ -1500,7 +1497,7 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: destNS, Name: dottedName}, &got)).To(Succeed())
 		Expect(got.GetAnnotations()).To(HaveKeyWithValue(
 			"projection.be0x74a.io/owned-by",
-			fmt.Sprintf("%s/%s", proj.Namespace, proj.Name),
+			projKey.Namespace+"/"+projKey.Name,
 		))
 	})
 })
