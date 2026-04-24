@@ -2,6 +2,8 @@
 
 `projection` exposes three signals. They are complementary, and you will want to use all three in production.
 
+The condition types, reasons, event reasons, and metric names listed below are part of the [v1 API stability promise](api-stability.md) — they will not be renamed or repurposed.
+
 ## 1. Status conditions
 
 Every `Projection` carries three conditions. They are the primary source of truth — they're what `kubectl wait` and `kubectl get` surface.

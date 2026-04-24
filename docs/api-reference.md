@@ -32,7 +32,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `namespace` _string_ | Namespace to project into. Defaults to the Projection's own namespace.<br />Mutually exclusive with NamespaceSelector. |  | MaxLength: 63 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta)_ | NamespaceSelector selects namespaces to project into by label.<br />Mutually exclusive with Namespace. |  | Optional: \{\} <br /> |
-| `name` _string_ | Name in the destination namespace. Defaults to Source.Name. |  | MaxLength: 63 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Optional: \{\} <br /> |
+| `name` _string_ | Name in the destination namespace. Defaults to Source.Name. DNS-1123<br />subdomain: lowercase alphanumerics, '-', and '.', up to 253 chars. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Optional: \{\} <br /> |
 
 
 #### Overlay
@@ -57,7 +57,11 @@ _Appears in:_
 
 
 
-Projection is the Schema for the projections API.
+Projection mirrors one Kubernetes object from a source location to one or
+more destination namespaces, declaratively and conflict-safely. Source
+edits propagate to destinations in ~100 ms via dynamic watches. Destinations
+carry a projection.be0x74a.io/owned-by annotation the controller uses to
+refuse overwriting resources it did not create.
 
 
 
@@ -99,7 +103,8 @@ ProjectionList contains a list of Projection.
 
 
 
-ProjectionSpec defines the desired state of Projection.
+ProjectionSpec specifies which source object to mirror, where to write it,
+and what metadata overlays to apply.
 
 
 
@@ -117,7 +122,8 @@ _Appears in:_
 
 
 
-ProjectionStatus defines the observed state of Projection.
+ProjectionStatus reports the most recent reconcile outcome via three
+conditions: SourceResolved, DestinationWritten, and Ready.
 
 
 
@@ -144,7 +150,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | APIVersion of the source object, e.g. "v1" or "apps/v1". |  | MinLength: 1 <br />Pattern: `^([a-z0-9.-]+/)?v[0-9]+((alpha\|beta)[0-9]+)?$` <br />Required: \{\} <br /> |
 | `kind` _string_ | Kind of the source object, e.g. "ConfigMap". |  | MinLength: 1 <br />Pattern: `^[A-Z][A-Za-z0-9]*$` <br />Required: \{\} <br /> |
-| `name` _string_ | Name of the source object. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `name` _string_ | Name of the source object. DNS-1123 subdomain: lowercase alphanumerics,<br />'-', and '.', up to 253 chars. Matches the permissive form Kubernetes<br />uses for most named objects (ConfigMap, Secret, Deployment, Pod, …). |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Required: \{\} <br /> |
 | `namespace` _string_ | Namespace of the source object. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 
 

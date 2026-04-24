@@ -1438,6 +1438,68 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 				"destination in %s didn't receive the source update", nsCopy)
 		}
 	})
+
+	It("accepts and reconciles a source whose name contains a dot (Finding C regression)", func() {
+		sourceNS := uniqueNS("fc-src")
+		destNS := uniqueNS("fc-dst")
+		ensureNamespace(sourceNS)
+		ensureNamespace(destNS)
+
+		const dottedName = "app.config-v2"
+		projKey := types.NamespacedName{Name: "finding-c-" + nextID(), Namespace: sourceNS}
+		DeferCleanup(deleteProjection, projKey)
+
+		// Source ConfigMap with a name containing a dot — valid Kubernetes
+		// subdomain, would have been rejected by admission under the v0.1
+		// label-only regex.
+		Expect(k8sClient.Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      dottedName,
+				Namespace: sourceNS,
+				Annotations: map[string]string{
+					"projection.be0x74a.io/projectable": "true",
+				},
+			},
+			Data: map[string]string{"foo": "bar"},
+		})).To(Succeed())
+
+		// Projection referencing the dotted source. Admission should accept the
+		// subdomain-format name.
+		proj := &projectionv1.Projection{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      projKey.Name,
+				Namespace: projKey.Namespace,
+			},
+			Spec: projectionv1.ProjectionSpec{
+				Source: projectionv1.SourceRef{
+					APIVersion: "v1",
+					Kind:       "ConfigMap",
+					Name:       dottedName,
+					Namespace:  sourceNS,
+				},
+				Destination: projectionv1.DestinationRef{
+					Namespace: destNS,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+
+		// The reconciler should pick it up and write a destination with the
+		// same dotted name in the destination namespace.
+		Eventually(func() error {
+			var got corev1.ConfigMap
+			return k8sClient.Get(ctx, client.ObjectKey{Namespace: destNS, Name: dottedName}, &got)
+		}, 10*time.Second, 200*time.Millisecond).Should(Succeed())
+
+		// Sanity-check the ownership annotation — confirms the destination was
+		// written by this Projection, not a coincidental pre-existing object.
+		var got corev1.ConfigMap
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: destNS, Name: dottedName}, &got)).To(Succeed())
+		Expect(got.GetAnnotations()).To(HaveKeyWithValue(
+			"projection.be0x74a.io/owned-by",
+			projKey.Namespace+"/"+projKey.Name,
+		))
+	})
 })
 
 var _ = Describe("watchedGvks metric", func() {
