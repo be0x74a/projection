@@ -132,13 +132,17 @@ via the `RESTMapper` on every reconcile. When a CRD author promotes
 version automatically on the next reconcile rather than failing with
 `SourceResolutionFailed` and garbage-collecting the destination.
 
+As with the ConfigMap example above, the source Deployment must carry
+`projection.be0x74a.io/projectable: "true"` if the controller is running in
+allowlist mode (the default). See [Source opt-in](#source-opt-in) above.
+
 The resolved version is reported in the `SourceResolved` condition message,
 so you can always see which version your projection is currently on:
 
 ```bash
-kubectl describe projection my-deployment-mirror \
-  | grep -A2 SourceResolved
-# → Message: resolved apps/Deployment to preferred version v1
+kubectl get projection my-deployment-mirror \
+  -o jsonpath='{.status.conditions[?(@.type=="SourceResolved")].message}'
+# → resolved apps/Deployment to preferred version v1
 ```
 
 Pinning (`apps/v1`) is still available when you want an explicit stability

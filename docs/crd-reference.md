@@ -24,8 +24,8 @@ The `*` sentinel is invalid without a group prefix (there is no unpinned form fo
 The resolved version is surfaced in the `SourceResolved` condition message:
 
 ```bash
-kubectl describe projection <name> | grep -A2 SourceResolved
-# → Message: resolved apps/Deployment to preferred version v1
+kubectl get projection <name> -o jsonpath='{.status.conditions[?(@.type=="SourceResolved")].message}'
+# → resolved apps/Deployment to preferred version v1
 ```
 
 Examples:
