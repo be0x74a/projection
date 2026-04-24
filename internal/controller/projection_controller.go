@@ -509,7 +509,20 @@ func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.Gr
 	if err != nil {
 		return schema.GroupVersionResource{}, "", fmt.Errorf("parsing apiVersion %q: %w", src.APIVersion, err)
 	}
-	mapping, err := r.RESTMapper.RESTMapping(schema.GroupKind{Group: gv.Group, Kind: src.Kind}, gv.Version)
+	gk := schema.GroupKind{Group: gv.Group, Kind: src.Kind}
+
+	var mapping *apimeta.RESTMapping
+	switch {
+	case gv.Version == "*" && gv.Group == "":
+		return schema.GroupVersionResource{}, "", fmt.Errorf(
+			"apiVersion %q: group is required when version is unpinned", src.APIVersion)
+	case gv.Version == "*":
+		// Unpinned: RESTMapper picks the preferred served version.
+		mapping, err = r.RESTMapper.RESTMapping(gk)
+	default:
+		// Pinned to a specific version (today's behavior).
+		mapping, err = r.RESTMapper.RESTMapping(gk, gv.Version)
+	}
 	if err != nil {
 		return schema.GroupVersionResource{}, "", fmt.Errorf("resolving %s/%s: %w", src.APIVersion, src.Kind, err)
 	}
@@ -1015,7 +1028,13 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if err != nil {
 				// Malformed apiVersion — admission should reject this, but if it
 				// ever slips through, indexing under "" rather than panicking
-				// keeps the controller alive. Reconcile will surface the error.
+				// keeps the controller alive. Reconcile will surface the error
+				// via SourceResolutionFailed; the V(1) log here is defense-in-depth
+				// for cases where admission silently failed-open (CRD removed,
+				// schema migration, manual etcd write).
+				ctrl.Log.WithName("source-indexer").V(1).Info(
+					"skipping index entry for malformed apiVersion",
+					"projection", client.ObjectKeyFromObject(p), "apiVersion", p.Spec.Source.APIVersion)
 				return nil
 			}
 			return []string{sourceKey(
