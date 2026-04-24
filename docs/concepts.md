@@ -181,7 +181,7 @@ When a previously-projected source flips to `"false"`, the destination is **garb
 
 - No source watch is declared at startup. The controller starts with only a watch on `Projection` itself.
 - The first reconcile for a given source GVK registers a dynamic, **metadata-only** source watch (we don't need the full object — events just enqueue Projections, the next reconcile fetches fresh).
-- A field indexer on `spec.sourceKey` (derived from `apiVersion/kind/namespace/name`) maps incoming source events to every Projection pointing at them in a single cached `List` call — O(1) regardless of how many Projections reference the same source.
+- A field indexer on `spec.sourceKey` (derived from `group/kind/namespace/name`) maps incoming source events to every Projection pointing at them in a single cached `List` call — O(1) regardless of how many Projections reference the same source.
 - Subsequent Projections that reference the same GVK reuse the existing watch.
 
 This is what keeps propagation under ~100 ms without periodic polling.
