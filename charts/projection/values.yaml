@@ -78,6 +78,41 @@ healthProbe:
 # as a source-owner veto — the source owner's escape hatch.
 sourceMode: allowlist
 
+# -- Kinds this operator instance is permitted to project, expressed as RBAC
+# rule fragments. The chart injects each entry into the operator's
+# ClusterRole with the full verb set (get, list, watch, create, update,
+# patch, delete). See docs/security.md for the full story.
+#
+# The default below grants cluster-admin-equivalent access (`*/*`),
+# preserving pre-v0.2 behavior. Regulated clusters (finance, healthcare,
+# government) SHOULD replace this with an explicit allowlist before
+# deploying. An empty list (`supportedKinds: []`) grants NOTHING beyond
+# the operator's own Projection CRs — the controller can reconcile
+# its own state but cannot read or write any other Kind.
+#
+# Wildcards (`*`) are allowed in both apiGroup and resources. Note the
+# subtle but important distinction:
+#   - apiGroup: ""   => core API group only (ConfigMap, Secret, Pod, ...)
+#   - apiGroup: "*"  => any API group, including core
+# The resource name is the lowercase plural shown by `kubectl api-resources`
+# (e.g. `configmaps`, `secrets`, `ingresses`).
+#
+# Example — strict, read+write for two core-group Kinds:
+# supportedKinds:
+#   - apiGroup: ""
+#     resources: [configmaps, secrets]
+#
+# Example — moderate, any resource in a trusted group:
+# supportedKinds:
+#   - apiGroup: projection.be0x74a.io
+#     resources: ["*"]
+#
+# Example — disable entirely (operator becomes inert for external Kinds):
+# supportedKinds: []
+supportedKinds:
+  - apiGroup: "*"
+    resources: ["*"]
+
 # -- Resource requests and limits for the controller container.
 # Sensible defaults for a single-tenant operator; tune for your workload.
 resources:
