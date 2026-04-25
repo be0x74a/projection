@@ -118,7 +118,7 @@ Some Kinds carry apiserver-allocated spec fields the controller strips before wr
 
 On update, the controller copies these fields from the existing destination back onto the desired object before issuing the `Update`, so an `Update` of a `Service` whose `clusterIP` we stripped at build time isn't rejected for trying to clear an immutable field.
 
-If you hit `field is immutable` errors for a Kind not in the table above, the controller is likely missing an entry in `droppedSpecFieldsByGVK` — see [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-kind-to-droppedspecfieldsbygvk) for the path to add one, and please [open an issue](https://github.com/be0x74a/projection/issues/new).
+If you hit `field is immutable` errors for a Kind not in the table above, the controller is likely missing an entry in `droppedSpecFieldsByGVK` — see [CONTRIBUTING.md](https://github.com/be0x74a/projection/blob/main/CONTRIBUTING.md#adding-a-kind-to-droppedspecfieldsbygvk) for the path to add one, and please [open an issue](https://github.com/be0x74a/projection/issues/new).
 
 ## Fully-spelled-out example
 
