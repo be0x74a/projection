@@ -149,10 +149,11 @@ Roughly 40 ms of spread across 100 destinations.
 
 - Selector with >500 matching namespaces hasn't been measured yet. Reconcile
   time for the selector profile is dominated by the worker pool issuing
-  destination writes in parallel (`selectorWriteConcurrency=16`); throughput
-  past that depends on kube-apiserver APF priority-level budgets. If
-  operators see selector reconciles slowing at higher fan-out, making the
-  worker count configurable via flag is the first knob to reach for.
+  destination writes in parallel (default 16, configurable via the
+  `--selector-write-concurrency` flag / `selectorWriteConcurrency` Helm
+  value — see [observability.md](observability.md#--selector-write-concurrency--selectorwriteconcurrency-default-16));
+  throughput past that depends on kube-apiserver APF priority-level
+  budgets at the worker count you've configured.
 - Create/delete churn across unique GVKs: the controller's `watched` map
   grows monotonically as new GVKs are projected. Bounded in practice by the
   set of distinct Kinds installed on the cluster, so not a leak at realistic
