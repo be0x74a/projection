@@ -13,7 +13,7 @@ on production hardware.
 | | |
 |---|---|
 | Tool | `make bench PROFILE=<small\|medium\|selector>` |
-| Kubernetes | 1.31.0 via `kindest/node:v1.31.0` |
+| Kubernetes | 1.31.0 via `kindest/node:v1.31.0` (the chart now requires ≥1.32 for the destination CEL rule; numbers below predate the floor bump and have not been re-measured on 1.32 yet — re-bench is on the v1.0 to-do list) |
 | Cluster topology | single-node Kind (apiserver, etcd, scheduler, kubelet co-located) |
 | Host OS / arch | Ubuntu 24.04, amd64 |
 | Host hardware | AMD Ryzen (24-thread) / 32 GiB RAM, Proxmox VM |
@@ -21,7 +21,7 @@ on production hardware.
 | Controller | run locally (`go run ./cmd/main.go --metrics-bind-address=:8080 --metrics-secure=false`), connected to the Kind cluster via `/tmp/bench.kubeconfig` |
 | Harness → controller | harness scrapes `http://127.0.0.1:8080/metrics`; source-to-destination latency measured by stamping a unix-nano annotation on the source and polling destinations |
 
-All numbers below come from a `main` controller at the first post-launch tag.
+All numbers below come from a `main` controller at `v0.1.0-alpha.1` (the first published tag). They will be re-measured at v0.2.0 on a `kindest/node:v1.32.x` cluster; the scaling shape is expected to hold but absolute numbers may shift slightly.
 The harness spins up its own bench CRDs (`bench.projection.be0x74a.io/v1
 BenchObject{N}`), source objects, destination namespaces, and Projections,
 then tears them all down after the measurement window. Each profile runs a
@@ -62,7 +62,9 @@ duration_seconds              38.0
 
 At 100 Projections, the controller's footprint is negligible (~12 MB heap,
 ~54 MB RSS). User-visible source-to-destination latency sits at about 16 ms
-p50 and 25 ms p99 — controller reconcile + two apiserver round-trips.
+p50 and 25 ms p99 — wall-clock-dominated by the apiserver round-trips on
+the source watch event and the destination Get/Update; controller-side
+reconcile work itself is single-digit milliseconds (see `reconcile_p50_ms`).
 
 ### Profile: `medium` (1000 Projections, 20 GVKs, 50 namespaces)
 
@@ -97,6 +99,13 @@ noise. The controller is watch-driven (no periodic requeue on success), so
 idle 1k-Projection cost is dominated by the informer caches, which are
 shared-by-GVK rather than per-object. `watched_gvks` matches the input
 `gvks` exactly — one dynamic watch per distinct source Kind.
+
+Note that the `medium` profile uses **single-destination** Projections
+(1000 Projections × 1 destination each) — it does not exercise selector
+fan-out at scale. The `selector` profile below is the only fan-out data
+point published today, and it caps at 100 matching namespaces. Larger
+fan-out profiles (1k+ matching namespaces per Projection) are on the to-do
+list as part of the v1 readiness work.
 
 ### Profile: `selector` (1 Projection fanning out to 100 namespaces)
 
@@ -149,6 +158,22 @@ Roughly 40 ms of spread across 100 destinations.
   set of distinct Kinds installed on the cluster, so not a leak at realistic
   scale, but an unusual workload (e.g., rapid churn of scratch CRDs) could
   surface this.
+- **Steady-state apiserver load is governed by `--requeue-interval`** (Helm
+  value `requeueInterval`, default 30s). Dynamic source watches are the
+  authoritative path for source-edit propagation, so the requeue is mostly
+  a safety-net resync. Lowering it (e.g. 5s for dev clusters) increases
+  apiserver Get traffic linearly with Projection count; raising it (e.g.
+  2m for clusters with many flapping upstreams) cuts traffic at the cost
+  of slower transient-error recovery.
+- **Source-mode `allowlist` (the v0.2 default) adds no measurable overhead
+  per reconcile** — the projectability check is a single annotation lookup
+  on the already-fetched source object. Not benchmarked separately for that
+  reason.
+- **Leader election adds one apiserver Lease renewal per
+  `leaderElection.leaseDuration`** (default 15s) per controller pod, only
+  when `replicaCount > 1`. Negligible at single-replica scale; on large
+  fleets running many operator instances, raise the lease duration to cut
+  renewal traffic.
 
 ## Caveats
 
@@ -174,7 +199,9 @@ Roughly 40 ms of spread across 100 destinations.
 cd <projection-repo>
 
 # Terminal 1 — Kind + CRDs
-kind create cluster --name bench --image kindest/node:v1.31.0
+# Use a 1.32+ node to match the chart's kubeVersion floor. Published
+# numbers above were captured on 1.31; expect comparable shapes on 1.32.
+kind create cluster --name bench --image kindest/node:v1.32.0
 kind get kubeconfig --name bench > /tmp/bench.kubeconfig
 KUBECONFIG=/tmp/bench.kubeconfig make install
 
