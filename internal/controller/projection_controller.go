@@ -161,10 +161,29 @@ func (r *ProjectionReconciler) emit(proj *projectionv1.Projection, eventType, re
 }
 
 // sourceKey is the canonical string key identifying a source object across
-// both the field indexer and the event-mapping function. Keeping one helper
-// ensures the two sides can never drift.
-func sourceKey(apiVersion, kind, namespace, name string) string {
-	return apiVersion + "/" + kind + "/" + namespace + "/" + name
+// both the field indexer and the event-mapping function. The version is
+// intentionally omitted: source events always carry a resolved GVK, but a
+// Projection may reference its source via an unpinned form (e.g. apps/*).
+// Joining on (group, kind, namespace, name) keeps both sides in agreement
+// regardless of which served version the apiserver delivered the event for.
+func sourceKey(group, kind, namespace, name string) string {
+	return group + "/" + kind + "/" + namespace + "/" + name
+}
+
+// resolvedVersionMessage produces the human-readable SourceResolved
+// condition message when a Projection used the unpinned form (apps/*) and
+// the RESTMapper picked a concrete version. Returns "" for pinned sources
+// to preserve today's empty-message behavior.
+func resolvedVersionMessage(src projectionv1.SourceRef, resolvedVersion string) string {
+	gv, err := schema.ParseGroupVersion(src.APIVersion)
+	// resolvedVersion == "" means failDestination was called before
+	// resolveGVR ran (e.g. from the InvalidSpec mutex-violation path);
+	// there's no version to report yet.
+	if err != nil || gv.Version != "*" || resolvedVersion == "" {
+		return ""
+	}
+	return fmt.Sprintf("resolved %s/%s to preferred version %s",
+		gv.Group, src.Kind, resolvedVersion)
 }
 
 // benchStampAnnotation is the annotation the projection benchmark harness
@@ -239,20 +258,27 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if proj.Spec.Destination.Namespace != "" && proj.Spec.Destination.NamespaceSelector != nil {
 		msg := "destination.namespace and destination.namespaceSelector are mutually exclusive"
 		r.emit(proj, corev1.EventTypeWarning, "InvalidSpec", "Validate", msg)
-		return r.failDestination(ctx, proj, "InvalidSpec", msg)
+		return r.failDestination(ctx, proj, "", "InvalidSpec", msg)
 	}
 
-	gvr, err := r.resolveGVR(proj.Spec.Source)
+	gvr, resolvedVersion, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		return r.failSource(ctx, proj, "SourceResolutionFailed", "Resolve", err.Error())
 	}
 
 	// Register a watch on this source GVK if we haven't seen it before, so
 	// subsequent edits to the source enqueue this (and any other) Projection
-	// pointing at it instead of waiting for the next periodic requeue.
-	gv, _ := schema.ParseGroupVersion(proj.Spec.Source.APIVersion)
-	if err := r.ensureWatch(gv.WithKind(proj.Spec.Source.Kind)); err != nil {
-		logger.Error(err, "registering source watch", "gvk", gv.WithKind(proj.Spec.Source.Kind))
+	// pointing at it instead of waiting for the next periodic requeue. Key
+	// the watch on the *resolved* version (not the unpinned apiVersion the
+	// user supplied) so pinned (apps/v1) and unpinned (apps/*) Projections
+	// targeting the same Kind share a single watch entry.
+	watchGVK := schema.GroupVersionKind{
+		Group:   gvr.Group,
+		Version: resolvedVersion,
+		Kind:    proj.Spec.Source.Kind,
+	}
+	if err := r.ensureWatch(watchGVK); err != nil {
+		logger.Error(err, "registering source watch", "gvk", watchGVK)
 		// Don't fail the reconcile: the periodic-requeue-on-error path below
 		// still keeps us alive, and a future reconcile will retry the watch.
 	}
@@ -282,7 +308,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	destNamespaces, err := r.resolveDestinationNamespaces(ctx, proj)
 	if err != nil {
 		r.emit(proj, corev1.EventTypeWarning, "NamespaceResolutionFailed", "Resolve", err.Error())
-		return r.failDestination(ctx, proj, "NamespaceResolutionFailed", err.Error())
+		return r.failDestination(ctx, proj, resolvedVersion, "NamespaceResolutionFailed", err.Error())
 	}
 
 	var failures []nsFailure
@@ -352,10 +378,10 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if len(failures) > 1 {
 			msg = fmt.Sprintf("failed namespaces: %s", strings.Join(nsList, ", "))
 		}
-		return r.failDestination(ctx, proj, reason, msg)
+		return r.failDestination(ctx, proj, resolvedVersion, reason, msg)
 	}
 
-	if err := r.markAllReady(ctx, proj); err != nil {
+	if err := r.markAllReady(ctx, proj, resolvedVersion); err != nil {
 		return ctrl.Result{}, err
 	}
 	logBenchStampLatency(ctx, source, "reconcile-end")
@@ -479,7 +505,7 @@ func (r *ProjectionReconciler) ensureWatch(gvk schema.GroupVersionKind) error {
 // lets us do this with a single cached List.
 func (r *ProjectionReconciler) mapSource(ctx context.Context, obj client.Object) []reconcile.Request {
 	gvk := obj.GetObjectKind().GroupVersionKind()
-	key := sourceKey(gvk.GroupVersion().String(), gvk.Kind, obj.GetNamespace(), obj.GetName())
+	key := sourceKey(gvk.Group, gvk.Kind, obj.GetNamespace(), obj.GetName())
 	var list projectionv1.ProjectionList
 	if err := r.List(ctx, &list, client.MatchingFields{sourceIndex: key}); err != nil {
 		log.FromContext(ctx).Error(err, "listing projections by source index", "key", key)
@@ -495,14 +521,33 @@ func (r *ProjectionReconciler) mapSource(ctx context.Context, obj client.Object)
 	return reqs
 }
 
-func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.GroupVersionResource, error) {
+// resolveGVR maps a SourceRef's apiVersion+kind to a concrete GVR via the
+// cached RESTMapper. The second return value is the version the RESTMapper
+// picked — equal to gv.Version when the user pinned a version, or the
+// preferred served version when unpinned (gv.Version == "*"). Callers
+// surface the resolved version in the SourceResolved condition message
+// for operator-visibility.
+func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.GroupVersionResource, string, error) {
 	gv, err := schema.ParseGroupVersion(src.APIVersion)
 	if err != nil {
-		return schema.GroupVersionResource{}, fmt.Errorf("parsing apiVersion %q: %w", src.APIVersion, err)
+		return schema.GroupVersionResource{}, "", fmt.Errorf("parsing apiVersion %q: %w", src.APIVersion, err)
 	}
-	mapping, err := r.RESTMapper.RESTMapping(schema.GroupKind{Group: gv.Group, Kind: src.Kind}, gv.Version)
+	gk := schema.GroupKind{Group: gv.Group, Kind: src.Kind}
+
+	var mapping *apimeta.RESTMapping
+	switch {
+	case gv.Version == "*" && gv.Group == "":
+		return schema.GroupVersionResource{}, "", fmt.Errorf(
+			"apiVersion %q: group is required when version is unpinned", src.APIVersion)
+	case gv.Version == "*":
+		// Unpinned: RESTMapper picks the preferred served version.
+		mapping, err = r.RESTMapper.RESTMapping(gk)
+	default:
+		// Pinned to a specific version (today's behavior).
+		mapping, err = r.RESTMapper.RESTMapping(gk, gv.Version)
+	}
 	if err != nil {
-		return schema.GroupVersionResource{}, fmt.Errorf("resolving %s/%s: %w", src.APIVersion, src.Kind, err)
+		return schema.GroupVersionResource{}, "", fmt.Errorf("resolving %s/%s: %w", src.APIVersion, src.Kind, err)
 	}
 	// Projection only mirrors namespaced resources. Cluster-scoped Kinds
 	// (Namespace, ClusterRole, StorageClass, CRDs, PriorityClass, ...)
@@ -512,15 +557,15 @@ func (r *ProjectionReconciler) resolveGVR(src projectionv1.SourceRef) (schema.Gr
 	// a nonsensical URL that the apiserver 404s on). Fail fast with a
 	// clear message rather than surfacing the 404 downstream.
 	if mapping.Scope.Name() != apimeta.RESTScopeNameNamespace {
-		return schema.GroupVersionResource{}, fmt.Errorf(
+		return schema.GroupVersionResource{}, "", fmt.Errorf(
 			"%s/%s is cluster-scoped; projection only mirrors namespaced resources",
 			src.APIVersion, src.Kind)
 	}
-	return mapping.Resource, nil
+	return mapping.Resource, mapping.GroupVersionKind.Version, nil
 }
 
 func (r *ProjectionReconciler) deleteDestination(ctx context.Context, proj *projectionv1.Projection) error {
-	gvr, err := r.resolveGVR(proj.Spec.Source)
+	gvr, _, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		// Source Kind no longer resolves — we can't locate the destination.
 		// Proceed with finalizer removal rather than blocking forever.
@@ -834,8 +879,9 @@ func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv
 // (which has already fired per-namespace events in the fan-out loop) from
 // double-emitting, which the client-go events broadcaster would otherwise
 // aggregate into a record that drops the action field.
-func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, reason, msg string) (ctrl.Result, error) {
-	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", "")
+func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, resolvedVersion, reason, msg string) (ctrl.Result, error) {
+	srMsg := resolvedVersionMessage(proj.Spec.Source, resolvedVersion)
+	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", srMsg)
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionFalse, reason, msg)
 	setCondition(proj, conditionReady, metav1.ConditionFalse, reason, msg)
 	switch reason {
@@ -851,8 +897,9 @@ func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projec
 }
 
 // markAllReady flips all three conditions to True in a single status update.
-func (r *ProjectionReconciler) markAllReady(ctx context.Context, proj *projectionv1.Projection) error {
-	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", "")
+func (r *ProjectionReconciler) markAllReady(ctx context.Context, proj *projectionv1.Projection, resolvedVersion string) error {
+	msg := resolvedVersionMessage(proj.Spec.Source, resolvedVersion)
+	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", msg)
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionTrue, "Projected", "")
 	setCondition(proj, conditionReady, metav1.ConditionTrue, "Projected", "")
 	if err := r.Status().Update(ctx, proj); err != nil {
@@ -1002,8 +1049,21 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if !ok {
 				return nil
 			}
+			gv, err := schema.ParseGroupVersion(p.Spec.Source.APIVersion)
+			if err != nil {
+				// Malformed apiVersion — admission should reject this, but if it
+				// ever slips through, indexing under "" rather than panicking
+				// keeps the controller alive. Reconcile will surface the error
+				// via SourceResolutionFailed; the V(1) log here is defense-in-depth
+				// for cases where admission silently failed-open (CRD removed,
+				// schema migration, manual etcd write).
+				ctrl.Log.WithName("source-indexer").V(1).Info(
+					"skipping index entry for malformed apiVersion",
+					"projection", client.ObjectKeyFromObject(p), "apiVersion", p.Spec.Source.APIVersion)
+				return nil
+			}
 			return []string{sourceKey(
-				p.Spec.Source.APIVersion,
+				gv.Group,
 				p.Spec.Source.Kind,
 				p.Spec.Source.Namespace,
 				p.Spec.Source.Name,

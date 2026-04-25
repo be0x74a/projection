@@ -1,0 +1,16 @@
+apiVersion: projection.be0x74a.io/v1
+kind: Projection
+metadata:
+  labels:
+    app.kubernetes.io/name: projection
+    app.kubernetes.io/managed-by: kustomize
+  name: deployment-mirror-unpinned
+  namespace: default
+spec:
+  source:
+    apiVersion: apps/*
+    kind: Deployment
+    name: my-deployment
+    namespace: source-ns
+  destination:
+    namespace: dest-ns

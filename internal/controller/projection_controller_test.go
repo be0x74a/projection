@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -237,6 +238,12 @@ var _ = Describe("Projection Controller (integration)", func() {
 				HaveField("Reason", Equal("Projected")),
 			)))
 
+			// Regression: pinned apiVersion forms must keep an empty
+			// SourceResolved.message — only unpinned (apps/*) populates it.
+			sr := apimeta.FindStatusCondition(proj.Status.Conditions, "SourceResolved")
+			Expect(sr).ToNot(BeNil())
+			Expect(sr.Message).To(Equal(""), "pinned form must keep empty message")
+
 			// Create-path emits one Normal Projected event.
 			events := drainEvents(r)
 			Expect(events).To(ContainElement(ContainSubstring("Normal Projected")))
@@ -272,6 +279,52 @@ var _ = Describe("Projection Controller (integration)", func() {
 			}
 			Expect(projectedIdx).To(BeNumerically(">=", 0), "expected a Projected event")
 			Expect(updatedIdx).To(BeNumerically(">", projectedIdx), "expected Updated to follow Projected")
+		})
+
+		It("populates SourceResolved.message with the resolved version when apiVersion is unpinned", func() {
+			srcNS := uniqueNS("unpinned-src")
+			dstNS := uniqueNS("unpinned-dst")
+			ensureNamespace(srcNS)
+			ensureNamespace(dstNS)
+
+			src := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "src-dep",
+					Namespace:   srcNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "x"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx"}}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			unpinnedKey := types.NamespacedName{Name: "unpinned-proj", Namespace: srcNS}
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: unpinnedKey.Name, Namespace: unpinnedKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "apps/*", Kind: "Deployment",
+						Name: "src-dep", Namespace: srcNS,
+					},
+					Destination: projectionv1.DestinationRef{Namespace: dstNS},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			DeferCleanup(deleteProjection, unpinnedKey)
+
+			reconcileOnce(r, unpinnedKey)
+
+			got := &projectionv1.Projection{}
+			Expect(k8sClient.Get(ctx, unpinnedKey, got)).To(Succeed())
+			sr := apimeta.FindStatusCondition(got.Status.Conditions, "SourceResolved")
+			Expect(sr).ToNot(BeNil())
+			Expect(sr.Status).To(Equal(metav1.ConditionTrue))
+			Expect(sr.Message).To(Equal("resolved apps/Deployment to preferred version v1"))
 		})
 	})
 
@@ -1413,12 +1466,20 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		}
 
 		By("the reconciler's watched-GVK map has exactly one entry for v1/ConfigMap (idempotent registration)")
+		// Filter by GroupKind rather than asserting len(sharedR.watched) == 1:
+		// sharedR accumulates watches across specs in this Ordered block, so a
+		// future spec that adds a different source GVK would regress a total-count
+		// assertion. The invariant under test here is "one entry per GroupKind".
 		sharedR.watchedMu.Lock()
-		entries := len(sharedR.watched)
-		_, hasCM := sharedR.watched[schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}]
+		var cmCount int
+		for gvk := range sharedR.watched {
+			if gvk.Group == "" && gvk.Kind == "ConfigMap" {
+				cmCount++
+			}
+		}
 		sharedR.watchedMu.Unlock()
-		Expect(entries).To(Equal(1), "expected exactly one registered watch; got %d", entries)
-		Expect(hasCM).To(BeTrue(), "ConfigMap GVK not in watched map")
+		Expect(cmCount).To(Equal(1),
+			"expected exactly one v1/ConfigMap watch; got %d", cmCount)
 
 		By("updating the source — both destinations reflect the change via the shared watch")
 		updated := &corev1.ConfigMap{}
@@ -1435,6 +1496,109 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 					types.NamespacedName{Name: srcName, Namespace: nsCopy}, dst)
 				return dst.Data["version"]
 			}, 10*time.Second, 200*time.Millisecond).Should(Equal("2"),
+				"destination in %s didn't receive the source update", nsCopy)
+		}
+	})
+
+	It("a pinned and an unpinned Projection on the same source share one watch entry", func() {
+		id := nextID()
+		srcNS := uniqueNS("mixedwatch-src")
+		dstNS1 := uniqueNS("mixedwatch-dst1")
+		dstNS2 := uniqueNS("mixedwatch-dst2")
+		ensureNamespace(srcNS)
+		ensureNamespace(dstNS1)
+		ensureNamespace(dstNS2)
+
+		srcName := "shared-dep-" + id
+		pinnedKey := types.NamespacedName{Name: "pinned-proj-" + id, Namespace: srcNS}
+		unpinnedKey := types.NamespacedName{Name: "unpinned-proj-" + id, Namespace: srcNS}
+		DeferCleanup(deleteProjection, pinnedKey)
+		DeferCleanup(deleteProjection, unpinnedKey)
+
+		src := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        srcName,
+				Namespace:   srcNS,
+				Annotations: map[string]string{projectableAnnotation: "true"},
+			},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "x"}},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx"}}},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+		for _, spec := range []struct {
+			key        types.NamespacedName
+			apiVersion string
+			destNS     string
+		}{
+			{pinnedKey, "apps/v1", dstNS1},
+			{unpinnedKey, "apps/*", dstNS2},
+		} {
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: spec.key.Name, Namespace: spec.key.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: spec.apiVersion, Kind: "Deployment",
+						Name: srcName, Namespace: srcNS,
+					},
+					Destination: projectionv1.DestinationRef{Namespace: spec.destNS},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		}
+
+		By("both destinations are written by the manager-driven reconciler")
+		for _, dstNS := range []string{dstNS1, dstNS2} {
+			nsCopy := dstNS
+			Eventually(func() error {
+				d := &appsv1.Deployment{}
+				return k8sClient.Get(ctx,
+					client.ObjectKey{Namespace: nsCopy, Name: srcName}, d)
+			}, 10*time.Second, 200*time.Millisecond).Should(Succeed(),
+				"destination Deployment missing in %s", nsCopy)
+		}
+
+		By("apps/v1/Deployment has exactly one watch entry (pinned + unpinned share)")
+		// Scoped count — sharedR.watched accumulates watches across specs in this
+		// Ordered block (the preceding ConfigMap spec registered its own entry).
+		// Filter by GroupKind so the invariant under test ("pinned+unpinned share
+		// a single watch") is isolated from unrelated entries.
+		sharedR.watchedMu.Lock()
+		var appsDeployCount int
+		for gvk := range sharedR.watched {
+			if gvk.Group == "apps" && gvk.Kind == "Deployment" {
+				appsDeployCount++
+			}
+		}
+		sharedR.watchedMu.Unlock()
+		Expect(appsDeployCount).To(Equal(1),
+			"expected exactly one apps/Deployment watch; got %d", appsDeployCount)
+
+		By("editing the source — both destinations reflect the change via the shared watch")
+		updated := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx,
+			client.ObjectKey{Namespace: srcNS, Name: srcName}, updated)).To(Succeed())
+		if updated.Spec.Template.Annotations == nil {
+			updated.Spec.Template.Annotations = map[string]string{}
+		}
+		updated.Spec.Template.Annotations["bump"] = "1"
+		Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+		for _, dstNS := range []string{dstNS1, dstNS2} {
+			nsCopy := dstNS
+			Eventually(func() string {
+				d := &appsv1.Deployment{}
+				if err := k8sClient.Get(ctx,
+					client.ObjectKey{Namespace: nsCopy, Name: srcName}, d); err != nil {
+					return ""
+				}
+				return d.Spec.Template.Annotations["bump"]
+			}, 10*time.Second, 200*time.Millisecond).Should(Equal("1"),
 				"destination in %s didn't receive the source update", nsCopy)
 		}
 	})

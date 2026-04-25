@@ -7,6 +7,50 @@ This page covers cross-field invariants, controller-side condition reasons, the 
 - **Kind**: `Projection`
 - **Scope**: Namespaced
 
+## `source.apiVersion` forms
+
+`source.apiVersion` accepts three forms:
+
+| Form       | Semantics                                               |
+| ---------- | ------------------------------------------------------- |
+| `v1`       | Core group, pinned to v1.                               |
+| `apps/v1`  | Named group, pinned to v1.                              |
+| `apps/*`   | Named group, RESTMapper-preferred served version.       |
+
+The pinned forms (e.g. `v1`, `apps/v1`) lock the projection to an exact version — useful as a stability anchor when a CRD is mid-migration and you don't yet trust the new version. The unpinned form `<group>/*` follows the cluster: when a CRD author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than reporting `SourceResolutionFailed` and garbage-collecting destinations. The unpinned form is the recommended default for sources outside the core group, and especially valuable for CRDs. The same syntax works for any named group — `apps/*`, `networking.k8s.io/*`, `example.com/*`.
+
+The `*` sentinel is invalid without a group prefix (there is no unpinned form for the core group, which has stable versions). The regex accepts `*` for simplicity; the reconciler rejects the bare `*` case and reports `SourceResolved=False reason=SourceResolutionFailed`.
+
+The resolved version is surfaced in the `SourceResolved` condition message:
+
+```bash
+kubectl get projection <name> -o jsonpath='{.status.conditions[?(@.type=="SourceResolved")].message}'
+# → resolved apps/Deployment to preferred version v1
+```
+
+Examples:
+
+```yaml
+# Mirror a ConfigMap (core group, pinned)
+source:
+  apiVersion: v1
+  kind: ConfigMap
+```
+
+```yaml
+# Mirror a Deployment (named group, pinned)
+source:
+  apiVersion: apps/v1
+  kind: Deployment
+```
+
+```yaml
+# Mirror a custom resource, following the cluster's preferred version
+source:
+  apiVersion: example.com/*
+  kind: Widget
+```
+
 ## Destination invariants
 
 Setting both `namespace` and `namespaceSelector` is rejected by the reconciler with `DestinationWritten=False reason=InvalidSpec`. (This invariant is enforced controller-side rather than via CEL for cross-apiserver-version compatibility.)

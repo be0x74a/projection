@@ -22,10 +22,19 @@ import (
 
 // SourceRef identifies the Kubernetes object to project from.
 type SourceRef struct {
-	// APIVersion of the source object, e.g. "v1" or "apps/v1".
+	// APIVersion of the source object. Three forms accepted:
+	//   - "v1"      — core group, pinned to v1.
+	//   - "apps/v1" — named group, pinned to v1.
+	//   - "apps/*"  — named group, RESTMapper-preferred served version.
+	// The unpinned form follows the cluster: when a CRD author promotes
+	// v1beta1→v1, projection picks up the new preferred version on the
+	// next reconcile rather than reporting SourceResolutionFailed.
+	// The "*" sentinel is invalid without a group prefix (no "*" form
+	// for the core group, which has stable versions); enforced in the
+	// reconciler since the regex is permissive for simplicity.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern=`^([a-z0-9.-]+/)?v[0-9]+((alpha|beta)[0-9]+)?$`
+	// +kubebuilder:validation:Pattern=`^([a-z0-9.-]+/)?(v[0-9]+((alpha|beta)[0-9]+)?|\*)$`
 	APIVersion string `json:"apiVersion"`
 	// Kind of the source object, e.g. "ConfigMap".
 	// +kubebuilder:validation:Required
