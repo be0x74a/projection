@@ -196,9 +196,14 @@ Only relevant when `replicaCount > 1`. How long the leader holds the lease befor
 - **Longer (e.g. `30s`)** reduces lease-renewal traffic against the apiserver — useful on large fleets where many operators each renew their own leases.
 - **Shorter (e.g. `10s`)** speeds up failover at the cost of more apiserver churn. Must remain strictly greater than controller-runtime's 10s renew-deadline default — go below and leader election misbehaves.
 
-### Selector fan-out concurrency (compile-time: `16`)
+### `--selector-write-concurrency` / `selectorWriteConcurrency` (default: `16`)
 
-Selector-based Projections write destinations across matching namespaces in parallel, capped at **16 in-flight writes** per Projection. The cap is currently a compile-time constant (`selectorWriteConcurrency` in the controller source) — there is no flag yet. It exists so a Projection matching thousands of namespaces can't DoS the apiserver or blow out controller memory with goroutines. HTTP/2 multiplexing in client-go shares a single connection across the workers, so 16 is a comfortable fit within typical kube-apiserver APF priority-level budgets at production scale. If you have an operating point where this becomes a bottleneck, [open an issue](https://github.com/be0x74a/projection/issues/new) — the path to making it configurable is mechanical.
+Selector-based Projections write destinations across matching namespaces in parallel, capped per Projection at this value. Each worker issues a Get plus optionally a Create or Update against the apiserver; HTTP/2 multiplexing in client-go shares a single connection across the workers, so the flag caps parallelism rather than connections. The cap exists so a Projection matching thousands of namespaces can't DoS the apiserver or blow out controller memory with goroutines.
+
+- **Raise it (e.g. `64`, `128`)** when a single Projection matches many hundreds or thousands of namespaces and reconcile latency on that Projection is the constraint. The ceiling is set by your kube-apiserver's APF priority-level budget for the controller's identity, not by the controller — values above ~256 are rare enough that the controller logs a warning so you can confirm the choice was deliberate.
+- **Lower it (e.g. `4`, `8`)** on apiserver-constrained clusters or when sharing a priority-level budget with other heavy controllers. The trade-off is slower per-Projection reconcile time at large fan-out.
+
+Must be strictly greater than zero — the controller refuses to start with `--selector-write-concurrency=0` (the value would produce a zero-capacity worker semaphore that deadlocks on the first send).
 
 ## One-shot snapshot
 

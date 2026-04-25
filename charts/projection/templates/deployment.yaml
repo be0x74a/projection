@@ -62,6 +62,7 @@ spec:
             {{- end }}
             - --source-mode={{ .Values.sourceMode }}
             - --requeue-interval={{ .Values.requeueInterval }}
+            - --selector-write-concurrency={{ .Values.selectorWriteConcurrency }}
           ports:
             {{- if .Values.metrics.enabled }}
             - name: metrics

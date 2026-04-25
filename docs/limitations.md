@@ -83,10 +83,6 @@ Today `overlay` only merges labels and annotations. Useful additions:
 
 Scope to be defined — the north star is "make simple transforms trivial without turning `projection` into a policy engine."
 
-### 4. Tunable selector fan-out concurrency
-
-Today the worker pool that issues destination writes during selector fan-out is capped at 16 in-flight writes (a compile-time constant; see [Observability § 4](observability.md#selector-fan-out-concurrency-compile-time-16)). When real operators report the cap as a bottleneck, exposing it as a flag is the obvious next step.
-
 ## Getting involved
 
 Found a Kind we should support out of the box, a use case the API doesn't cover, a bug, or a documentation gap? [Open an issue](https://github.com/be0x74a/projection/issues/new). Contributions welcome — see `CONTRIBUTING.md` in the repo.

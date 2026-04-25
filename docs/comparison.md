@@ -89,4 +89,4 @@ The flip side of the section above. There are real cases where the right answer 
 
 - **You need cross-cluster.** `projection` is same-cluster only and that's a non-goal for v1. None of the three tools here do cross-cluster — see the bullet above.
 
-- **You're chasing absolute throughput at extreme fan-out.** `projection` caps selector fan-out at 16 concurrent destination writes (compile-time, no flag yet). At thousands of matching namespaces this becomes the bottleneck. Tunable in a future release; today, sized for clusters in the low hundreds of namespaces.
+- **You're chasing absolute throughput at extreme fan-out.** `projection` caps selector fan-out at 16 concurrent destination writes per Projection by default. The cap is tunable via `--selector-write-concurrency` (Helm value `selectorWriteConcurrency`) — see [observability.md](observability.md#--selector-write-concurrency--selectorwriteconcurrency-default-16) — but the ceiling is ultimately bounded by your kube-apiserver's APF budget rather than this knob, so at thousands of matching namespaces you'll want to validate the cluster can absorb the parallel write load before raising the value.
