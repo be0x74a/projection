@@ -31,6 +31,8 @@ It exists because every team eventually rebuilds this with a one-off controller 
 [emberstack/Reflector]: https://github.com/emberstack/kubernetes-reflector
 [`generate`]: https://kyverno.io/docs/writing-policies/generate/
 
+For the longer comparison — including the cases where Reflector or Kyverno is the better choice — see [docs/comparison.md](docs/comparison.md).
+
 ## 60-second demo
 
 ```yaml
@@ -79,14 +81,17 @@ Pre-existing object at the destination? `Ready=False reason=DestinationConflict`
 
 ## Features
 
-- ✅ **Any Kind** — `RESTMapper`-driven GVR resolution. Works on built-in resources, your CRDs, anything the apiserver knows about.
-- ⚡ **Watch-driven** — dynamic informer registration per source GVK. Edits propagate in ~100ms; no periodic polling.
-- 🔒 **Conflict-safe** — ownership annotation marks our destinations. We refuse to overwrite objects we don't own and report `DestinationConflict` on status.
-- 🧹 **Clean deletion** — finalizer removes the destination on `Projection` deletion. If ownership has been stripped, we leave the object alone.
-- 📊 **Observable** — three status conditions (`SourceResolved`, `DestinationWritten`, `Ready`), Kubernetes Events for every state transition, and a `projection_reconcile_total{result}` Prometheus counter.
-- 🛡️ **Validated at admission** — `Source` fields are pattern-validated (DNS-1123 names, PascalCase Kinds) so typos fail at `kubectl apply`, not at runtime.
-- 🪞 **Smart copy** — strips server-owned metadata, drops `.status`, removes `kubectl.kubernetes.io/last-applied-configuration`, and preserves apiserver-allocated fields like `Service.spec.clusterIP` on update.
-- 🪶 **Small** — one CRD, one Deployment, one container. Distroless image, multi-arch (amd64, arm64).
+- **Any Kind** — `RESTMapper`-driven GVR resolution. Works on built-in resources, your CRDs, anything the apiserver knows about. Source `apiVersion` accepts both pinned forms (`apps/v1`) and the unpinned `apps/*` form, which follows the cluster's preferred served version.
+- **Watch-driven** — dynamic informer registration per source GVK. Edits propagate in ~100ms; no periodic polling.
+- **Selector-based fan-out** — one `Projection` can mirror its source into every namespace matching a `namespaceSelector`, with destinations added and removed as namespaces gain or lose the matching label. Bounded fan-out concurrency keeps the apiserver healthy at scale.
+- **Source-owner consent** — default `sourceMode=allowlist` requires sources to carry `projection.be0x74a.io/projectable="true"`. Source owners can also veto with `="false"` regardless of mode.
+- **Conflict-safe** — ownership annotation marks our destinations. We refuse to overwrite objects we don't own and report `DestinationConflict` on status. Source deletion (404) automatically cleans up every owned destination.
+- **Clean deletion** — finalizer removes destinations on `Projection` deletion (sweeping all namespaces for selector-based fan-out). If ownership has been stripped, we leave the object alone.
+- **Observable** — three status conditions (`SourceResolved`, `DestinationWritten`, `Ready`), `events.k8s.io/v1` Events with `action` verbs (Create/Update/Delete/Get/Validate/Resolve/Write), and Prometheus metrics (`projection_reconcile_total{result}`, `projection_watched_gvks`).
+- **Validated at admission** — `Source` fields are pattern-validated (DNS-1123 names, PascalCase Kinds) so typos fail at `kubectl apply`, not at runtime. CEL enforces `destination.namespace` ⊕ `destination.namespaceSelector` mutual exclusion.
+- **Smart copy** — strips server-owned metadata, drops `.status`, removes `kubectl.kubernetes.io/last-applied-configuration`, strips Kind-specific apiserver-allocated spec fields (Service `clusterIP`/`clusterIPs`, PVC `volumeName`, Pod `nodeName`, Job `selector`+controller-uid labels), and preserves them on update.
+- **Production-grade Helm chart** — opt-in `ServiceMonitor`, `NetworkPolicy` (egress lockdown), and `PodDisruptionBudget` templates. Operational tuning via `requeueInterval` and `leaderElection.leaseDuration`. RBAC scope narrowable via `supportedKinds`.
+- **Small** — one CRD, one Deployment, one container. Distroless image, multi-arch (amd64, arm64).
 
 ## Quick start
 
@@ -124,23 +129,28 @@ See [docs/concepts.md](docs/concepts.md) for the full picture, [docs/observabili
 - **Service mirroring** — expose a backend `Service` from one namespace into another without a manual `ExternalName` dance.
 - **CR replication** — mirror an `Issuer`, a `KafkaTopic`, or any custom resource between namespaces in the same cluster.
 
-## v0 limitations (and what's planned)
+## Limitations
 
-- **Single destination per `Projection`.** Multi-destination fan-out via label selector is on the roadmap; for now declare one `Projection` per destination namespace.
 - **Same-cluster only.** Cross-cluster mirroring is a non-goal for v0.
-- **A few Kinds need extra care.** `Service`, `PersistentVolumeClaim`, `Pod`, and `Job` have apiserver-allocated spec fields handled out of the box. Other Kinds with similar fields (rare) may need an addition to `droppedSpecFieldsByGVK` — see [limitations](docs/limitations.md#some-kinds-need-extra-stripping-rules).
-- **Alpha.** API may change before v1.0.0. CRD storage version is `v1`; future versions will be served alongside with conversion.
+- **Cluster-scoped Kinds rejected.** `Projection` only mirrors namespaced resources. Pointing at a `Namespace`, `ClusterRole`, or `StorageClass` surfaces `SourceResolved=False reason=SourceResolutionFailed` with a clear message.
+- **Selector fan-out shares one overlay.** All destinations in a `namespaceSelector` Projection get the same overlay; per-destination overlays require separate Projections.
+- **A few Kinds need extra care.** `Service`, `PersistentVolumeClaim`, `Pod`, and `Job` have apiserver-allocated spec fields handled out of the box. Jobs created with `spec.manualSelector: true` are not supported. Other Kinds with similar fields (rare) may need an addition to `droppedSpecFieldsByGVK` — see [limitations](docs/limitations.md#some-kinds-need-extra-stripping-rules).
+- **Pre-1.0.** API stability commitments (which fields will not change, how breaking changes are handled) are documented in [docs/api-stability.md](docs/api-stability.md). CRD storage version is `v1`; future versions will be served alongside with conversion.
 
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
 - [Concepts](docs/concepts.md)
-- [API reference](docs/api-reference.md)
+- [API reference](docs/api-reference.md) (auto-generated from `api/v1/projection_types.go`)
 - [CRD behavior and examples](docs/crd-reference.md)
 - [Use cases](docs/use-cases.md)
 - [Comparison vs alternatives](docs/comparison.md)
 - [Observability](docs/observability.md)
 - [Security model](docs/security.md)
+- [API stability](docs/api-stability.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Upgrade guide](docs/upgrade.md)
+- [Scale and benchmarks](docs/scale.md)
 - [Limitations & roadmap](docs/limitations.md)
 
 ## Contributing
