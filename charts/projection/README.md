@@ -10,7 +10,10 @@ resources across namespaces.
   lifecycle note below).
 - A cluster-scoped controller Deployment running the `projection` manager.
 - A ServiceAccount plus a ClusterRole / ClusterRoleBinding granting the
-  controller the privileges it needs to mirror any resource Kind.
+  controller the privileges it needs to mirror resource Kinds. The set of
+  Kinds the controller may touch is governed by the `supportedKinds` value
+  (defaults to `*/*` for backwards-compatibility; narrow it for regulated
+  clusters — see [docs/security.md](../../docs/security.md)).
 - A namespaced Role / RoleBinding for leader election (leases + events) in the
   release namespace.
 - A ClusterIP Service exposing Prometheus metrics on port 8443 (HTTPS,
@@ -39,7 +42,7 @@ Override the image for local / air-gapped deployments:
 helm install projection charts/projection \
   --namespace projection-system --create-namespace \
   --set image.repository=my-registry/projection \
-  --set image.tag=v0.1.0
+  --set image.tag=v0.1.0-alpha.1
 ```
 
 ## Upgrade
@@ -110,13 +113,15 @@ multiple releases.
 | `serviceMonitor.labels`             | `{}`                          | Extra labels for prometheus-operator's `serviceMonitorSelector`.            |
 | `serviceMonitor.tlsConfig`          | `insecureSkipVerify: true`    | TLS config for scraping the HTTPS metrics endpoint.                         |
 | `networkPolicy.enabled`             | `false`                       | Render a NetworkPolicy restricting controller egress.                       |
-| `networkPolicy.dns`                 | `kube-system / k8s-app=kube-dns / 53` | Cluster DNS pod selector for the DNS egress rule.                     |
+| `networkPolicy.dns`                 | object: `namespace`, `podLabels`, `port` (defaults to `kube-system` / `k8s-app: kube-dns` / `53`) | Cluster DNS pod selector for the DNS egress rule.                     |
 | `networkPolicy.extraEgress`         | `[]`                          | Extra egress rules (each a NetworkPolicyEgressRule).                        |
 | `podDisruptionBudget.enabled`       | `false`                       | Render a PodDisruptionBudget for the controller Deployment.                 |
 | `podDisruptionBudget.minAvailable`  | `1`                           | Minimum pods available. Set exactly one of minAvailable / maxUnavailable.   |
 | `podDisruptionBudget.maxUnavailable`| `null`                        | Max pods unavailable. Leave null when using minAvailable.                   |
 | `requeueInterval`                   | `30s`                         | Requeue cadence for reconciliation. See observability.md for tuning guidance. |
 | `leaderElection.leaseDuration`      | `15s`                         | Leader-election lease duration. Only effective when `leaderElection.enabled=true`. |
+| `sourceMode`                        | `allowlist`                   | Source projectability policy. `allowlist` requires source objects to carry `projection.be0x74a.io/projectable="true"`; `permissive` allows any source unless explicitly opted out. See [docs/concepts.md](../../docs/concepts.md). |
+| `supportedKinds`                    | `[{apiGroup: "*", resources: ["*"]}]` | RBAC scope for the controller's ClusterRole. Default preserves pre-v0.2 cluster-admin-equivalent access. Replace with an explicit list to narrow; `[]` grants nothing beyond Projection CRs. See [docs/security.md](../../docs/security.md). |
 
 ## Example
 
@@ -126,6 +131,10 @@ kind: ConfigMap
 metadata:
   name: source-cm
   namespace: default
+  annotations:
+    # Required when the controller runs with the default sourceMode=allowlist.
+    # Skip this annotation if you set sourceMode=permissive.
+    projection.be0x74a.io/projectable: "true"
 data:
   greeting: hello
 ---

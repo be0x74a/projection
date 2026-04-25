@@ -7,7 +7,7 @@ Whether you're fixing a typo or adding a feature, you're welcome here.
 
 Prerequisites:
 
-- Go 1.24+
+- Go 1.25+
 - Docker (for building images and running Kind)
 - [Kind](https://kind.sigs.k8s.io/) (for local clusters and e2e tests)
 - `make`
@@ -47,7 +47,7 @@ that streams reconciler logs, events, and Projection statuses side by side.
 Running a single Go test:
 
 ```bash
-export KUBEBUILDER_ASSETS="$(./bin/setup-envtest use 1.31.0 --bin-dir ./bin -p path)"
+export KUBEBUILDER_ASSETS="$(./bin/setup-envtest use 1.34.1 --bin-dir ./bin -p path)"
 go test ./internal/controller/ -run TestName -v
 ```
 
@@ -96,8 +96,7 @@ A couple of gotchas worth knowing before you lose time to them:
   mismatch error. Two workarounds: pull the per-platform tag
   (`:X.Y.Z-arm64`) and load that, or skip the load and install the
   operator with an `imagePullSecret` so the cluster pulls from the
-  registry directly (see `hack/observe.sh` area of the README for the
-  exact secret+SA patch commands).
+  registry directly.
 
 ## Adding a Kind to `droppedSpecFieldsByGVK`
 
