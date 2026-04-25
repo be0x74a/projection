@@ -63,7 +63,7 @@ The CRD is `projection.be0x74a.io/v1` and that group/version is the storage vers
 
 ## Roadmap
 
-The canonical, dated roadmap lives in [GitHub Project #3](https://github.com/users/be0x74a/projects/3); the items below are the rough priority order at the time of writing.
+In rough priority order at the time of writing:
 
 ### 1. OLM bundle for OperatorHub
 
