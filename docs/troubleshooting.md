@@ -24,17 +24,34 @@ Every entry assumes you have already located the failing condition. If you haven
 - [DestinationUpdateFailed](#destinationupdatefailed)
 - [DestinationWriteFailed](#destinationwritefailed) *(rollup across multiple namespaces)*
 
+## How to read events
+
+Every entry below references events the controller emits when a failure surfaces. The controller writes Events through `events.k8s.io/v1`, **not** the legacy `core/v1` API — `kubectl get events` (which reads `core/v1`) won't show them. Use the `events.k8s.io` resource:
+
+```bash
+# All events for one Projection, oldest first
+kubectl -n <ns> get events.events.k8s.io \
+  --field-selector regarding.name=<projection-name>,regarding.kind=Projection \
+  --sort-by=.lastTimestamp
+
+# Just Warnings, cluster-wide (handy in an on-call shell)
+kubectl get events.events.k8s.io -A --field-selector type=Warning | grep Projection
+```
+
+Each event carries an `action` verb (`Create`/`Update`/`Delete`/`Get`/`Validate`/`Resolve`/`Write`) alongside the `reason`, visible via `-o wide` or `-o yaml`. Successful state transitions (`Projected`, `Updated`, `DestinationDeleted`, `StaleDestinationDeleted`, `DestinationLeftAlone`) are emitted as `Normal` events and aren't covered by this guide — they're documented in [observability.md](observability.md#2-kubernetes-events) instead.
+
 ## `SourceResolved` failures
 
 ### SourceResolutionFailed
 
 The controller tried to translate `source.apiVersion` and `source.kind` into a `GroupVersionResource` and one of two gates refused: either the apiserver's RESTMapper could not find the `{Group, Kind}` mapping at all, or the mapping succeeded but the resolved Kind is cluster-scoped (the controller rejects cluster-scoped Kinds outright because `projection` only mirrors namespaced resources). No `Get` against your source has happened yet — this is a type-system error.
 
-Three things can cause it:
+Four things can cause it:
 
 - **The Kind is not registered in the cluster.** A CRD you project from is not installed, or was uninstalled. Confirm with `kubectl api-resources | grep <kind>`.
 - **The `apiVersion` or `kind` is mis-spelled.** The pattern validation on the CRD catches obvious typos at admission, but a Kind that happens to look right syntactically but does not exist slips through.
 - **The target Kind is cluster-scoped.** `projection` only mirrors namespaced resources (`Namespace`, `ClusterRole`, `StorageClass`, CRDs themselves, `PriorityClass`, and similar are all rejected). The message will read `<apiVersion>/<kind> is cluster-scoped; projection only mirrors namespaced resources`.
+- **You used bare `*` instead of `<group>/*`.** The unpinned form requires a group prefix — `apps/*`, `networking.k8s.io/*`, `example.com/*` are valid; bare `*` is not (the core group has stable versions, so an unpinned form there would have no meaning). The message will read `apiVersion "*": group is required when version is unpinned`.
 
 **Fix:** Install the missing CRD; or correct the `apiVersion`/`kind` spelling; or, if the Kind is genuinely cluster-scoped, `projection` is not the right tool for the job.
 

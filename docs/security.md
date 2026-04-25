@@ -136,7 +136,15 @@ Bind it only to the platform team's namespaces/SAs. Everyone else cannot create 
 
 These rules run at admission time, so they fail `kubectl apply`, not at reconcile.
 
-### 3. NetworkPolicy
+### 3. Destination ownership annotation
+
+Every destination written by `projection` is stamped with `projection.be0x74a.io/owned-by: <projection-namespace>/<projection-name>`. This annotation is the controller's safety primitive: on every reconcile, before updating or deleting a destination, the controller checks the annotation against its own coordinates and refuses to touch objects it doesn't own. A would-be conflicting Projection (or a buggy human action) cannot silently overwrite an unrelated tool's object — `DestinationConflict` is reported on status instead.
+
+A second marker, the label `projection.be0x74a.io/owned-by-uid: <projection-uid>`, lets the cleanup paths (stale-destination cleanup, finalizer sweep) find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking every namespace. The annotation is still verified after the label-driven list as a belt-and-braces guard against an attacker copying the label onto a stranger's object to trick the controller into deleting it.
+
+Treat both markers as part of the supported API: don't hand-edit them on objects in production. If you genuinely need to take over an existing object with `projection`, change its annotation deliberately — knowing that the controller will then update and delete it as if it had created it.
+
+### 4. NetworkPolicy
 
 The controller only talks to the apiserver. Restrict its egress to exactly that:
 
@@ -177,14 +185,36 @@ spec:
           port: 53
 ```
 
-Adjust selectors for your cluster. The chart ships an optional NetworkPolicy under `config/network-policy/` you can enable.
+Adjust selectors for your cluster. The chart renders an equivalent NetworkPolicy when `networkPolicy.enabled=true` (additional egress rules go in `networkPolicy.extraEgress`); the example above is what you'd write by hand without the chart.
+
+### 5. Restricted Pod Security Standard defaults
+
+The Helm chart ships pod- and container-level `securityContext` defaults that line up with the Kubernetes [restricted Pod Security Standard](https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted) — `runAsNonRoot: true`, `runAsUser: 65532`, `fsGroup: 65532`, `seccompProfile: RuntimeDefault` at the pod level, and `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]` at the container level. They are exposed as `securityContext.pod` and `securityContext.container` so cluster admins running an even stricter Pod Security Admission policy can override individual fields without losing the rest of the profile. There is no good reason to relax them — the controller is a single Go binary running as PID 1, with no shell and no need to write to the filesystem outside `/tmp`.
+
+### 6. ServiceAccount annotations (IRSA / Workload Identity)
+
+When the controller needs cloud-provider IAM credentials — usually because the source or destination Kind is reconciled from a managed service (e.g. AWS Secrets Manager via `external-secrets`, GCP Secret Manager) and you want to scope the operator's machine identity rather than mount static credentials — set `serviceAccount.annotations` in the chart values. The annotations are passed through verbatim to the operator's `ServiceAccount`:
+
+```yaml
+# AWS IRSA
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/projection-controller
+
+# GKE Workload Identity
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: projection@my-project.iam.gserviceaccount.com
+```
+
+This keeps the IAM/RBAC trust path inside the cluster's own identity primitives rather than introducing a separate credential file the operator has to mount.
 
 ## Image supply chain
 
 Release images are pushed to `ghcr.io/be0x74a/projection` and **cosign-signed** with GitHub's OIDC keyless workflow. Verify before pulling:
 
 ```bash
-cosign verify ghcr.io/be0x74a/projection:v0.1.0-alpha \
+cosign verify ghcr.io/be0x74a/projection:v0.1.0-alpha.1 \
   --certificate-identity-regexp "https://github.com/be0x74a/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -192,7 +222,7 @@ cosign verify ghcr.io/be0x74a/projection:v0.1.0-alpha \
 The Helm chart is published to `oci://ghcr.io/be0x74a/charts/projection` and signed with the same workflow:
 
 ```bash
-cosign verify oci://ghcr.io/be0x74a/charts/projection:0.1.0-alpha \
+cosign verify oci://ghcr.io/be0x74a/charts/projection:0.1.0-alpha.1 \
   --certificate-identity-regexp "https://github.com/be0x74a/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```

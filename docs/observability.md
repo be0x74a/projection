@@ -85,7 +85,7 @@ The controller emits Events on every state transition. They are the best way to 
 
 ### Querying
 
-All events for one Projection:
+All events for one Projection (note: the legacy `kubectl get events` reads the `core/v1` Event API and will *not* surface these — `projection` writes through `events.k8s.io/v1`, so the resource selector matters):
 
 ```bash
 kubectl -n <ns> get events.events.k8s.io \
@@ -105,13 +105,21 @@ The `action` is visible via `-o wide` or the full YAML (`-o yaml`), and is a sta
 
 ## 3. Prometheus metrics
 
-The controller registers `projection_reconcile_total`, a `CounterVec` labeled by `result`:
+The controller registers two projection-specific metrics on top of the standard controller-runtime ones.
+
+`projection_reconcile_total` — `CounterVec` labeled by `result`:
 
 ```
 projection_reconcile_total{result="success"}
 projection_reconcile_total{result="conflict"}
 projection_reconcile_total{result="source_error"}
 projection_reconcile_total{result="destination_error"}
+```
+
+`projection_watched_gvks` — `Gauge` (no labels). Tracks the number of distinct source GVKs the controller currently has dynamic watches registered for. Incremented when a Projection references a previously-unseen source GVK. Useful for capacity planning at scale: each watch has a memory and apiserver cost, so a steady-state value much higher than the number of distinct source Kinds your Projections actually reference can indicate watch leakage.
+
+```
+projection_watched_gvks
 ```
 
 Plus the usual controller-runtime metrics (`controller_runtime_reconcile_total`, `workqueue_depth`, etc.).
@@ -135,7 +143,7 @@ subjects:
     namespace: monitoring
 ```
 
-If you use the `PrometheusOperator`, the install ships a `ServiceMonitor` scraping `:8443/metrics` over HTTPS with the operator's serving cert.
+If you use the `PrometheusOperator`, the chart ships an opt-in `ServiceMonitor` (set `serviceMonitor.enabled=true`) that scrapes `:8443/metrics` over HTTPS with the operator's serving cert.
 
 Pass `--metrics-bind-address=0` at startup to disable the endpoint entirely. Pass `--metrics-secure=false` to downgrade to plain HTTP on `:8080` (not recommended).
 
@@ -187,6 +195,10 @@ Only relevant when `replicaCount > 1`. How long the leader holds the lease befor
 
 - **Longer (e.g. `30s`)** reduces lease-renewal traffic against the apiserver — useful on large fleets where many operators each renew their own leases.
 - **Shorter (e.g. `10s`)** speeds up failover at the cost of more apiserver churn. Must remain strictly greater than controller-runtime's 10s renew-deadline default — go below and leader election misbehaves.
+
+### Selector fan-out concurrency (compile-time: `16`)
+
+Selector-based Projections write destinations across matching namespaces in parallel, capped at **16 in-flight writes** per Projection. The cap is currently a compile-time constant (`selectorWriteConcurrency` in the controller source) — there is no flag yet. It exists so a Projection matching thousands of namespaces can't DoS the apiserver or blow out controller memory with goroutines. HTTP/2 multiplexing in client-go shares a single connection across the workers, so 16 is a comfortable fit within typical kube-apiserver APF priority-level budgets at production scale. If you have an operating point where this becomes a bottleneck, [open an issue](https://github.com/be0x74a/projection/issues/new) — the path to making it configurable is mechanical.
 
 ## One-shot snapshot
 
