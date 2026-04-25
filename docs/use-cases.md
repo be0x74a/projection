@@ -2,6 +2,8 @@
 
 Six worked examples, all shipped as-is in the repo under [`examples/`](https://github.com/be0x74a/projection/tree/main/examples). Each section below quotes the interesting bits; follow the links for the full manifests (the examples include namespace scaffolding, illustrative ConfigMaps/Secrets, etc.).
 
+> **A note on source opt-in.** The controller ships with `--source-mode=allowlist` as the default, so every source object below must carry `projection.be0x74a.io/projectable: "true"` for the destination to be written. The example files in [`examples/`](https://github.com/be0x74a/projection/tree/main/examples) already include the annotation. If you can't annotate the source — third-party CRs, controller-managed Secrets — flip the operator to `permissive` mode (Helm value `sourceMode: permissive`); the source-owner veto (`="false"`) still works in that mode. See [Source opt-in](getting-started.md#source-opt-in) for the longer explanation.
+
 ## 1. `ConfigMap` fan-out across namespaces
 
 **File:** [`examples/configmap-fan-out-selector.yaml`](https://github.com/be0x74a/projection/blob/main/examples/configmap-fan-out-selector.yaml)
@@ -91,14 +93,15 @@ kubectl get svc -n team-b  api -o jsonpath='{.spec.clusterIP}'   # 10.96.Y.Y (di
 
 **Gotchas:** the destination `Service` has its own endpoints — if the `selector` doesn't match any Pods in `team-b`, the destination `Service` will have no endpoints. This is usually what you want for `type: ExternalName`-style workflows; it's rarely what you want for `ClusterIP`. Think about whether you really need `Service` mirroring or whether an `ExternalName` pointing at the source FQDN is a better fit.
 
-## 4. Multiple destinations from one source
+## 4. Per-destination overlays
 
 **File:** [`examples/multiple-destinations-from-one-source.yaml`](https://github.com/be0x74a/projection/blob/main/examples/multiple-destinations-from-one-source.yaml)
 
-Until label-selector fan-out lands (see [Roadmap](limitations.md#roadmap)), declare one `Projection` per destination.
+Use case 1 (`namespaceSelector` fan-out) gives every destination the *same* overlay — labels and annotations are evaluated once, then stamped on every copy. When each destination needs a **different** overlay (a tenant tag, an environment label, a per-team annotation), declare one `Projection` per destination instead. A separate `Projection` is also the right shape when the destinations don't share a label predicate — three pre-existing namespaces created by other teams, for example, with no shared marker for the selector to match on.
 
 ```yaml
-# Snippet — three tenants, three Projections, one source
+# Snippet — three tenants, three Projections, one source. Each destination
+# gets its own overlay so the projected ConfigMap carries the right tenant tag.
 - name: org-policy-tenant-a
   spec:
     destination: { namespace: tenant-a }
@@ -113,9 +116,11 @@ Until label-selector fan-out lands (see [Roadmap](limitations.md#roadmap)), decl
     overlay: { labels: { tenant: tenant-c } }
 ```
 
-**Expected outcome:** each tenant sees its own copy of `org-policy` tagged with `tenant=<tenant-id>`. Status is per-Projection — a `DestinationConflict` in `tenant-c` doesn't block `tenant-a`/`tenant-b` from reconciling.
+**Expected outcome:** each tenant sees its own copy of `org-policy` tagged with `tenant=<tenant-id>`. Status is per-Projection — a `DestinationConflict` in `tenant-c` doesn't block `tenant-a`/`tenant-b` from reconciling, and each Projection has its own `Ready` condition you can `kubectl wait` on independently.
 
-**Gotchas:** duplicates your YAML. Kustomize / Helm templating / GitOps generators are your friend here until multi-destination lands.
+**Gotchas:** more YAML to maintain. Kustomize / Helm templating / GitOps generators are the answer; the per-Projection shape is what unlocks the per-destination overlay, not a workaround for missing fan-out.
+
+**When to pick selector fan-out instead:** if every destination wants the same overlay and you can label the namespaces, [use case 1](#1-configmap-fan-out-across-namespaces) is the simpler shape — one `Projection` instead of N.
 
 ## 5. Overlay labels
 

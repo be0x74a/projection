@@ -2,7 +2,7 @@
 
 This walks through installing the `projection` operator and creating your first `Projection`.
 
-> **Upgrading from v0.1.0-alpha?** Read the [upgrade guide](upgrade.md) first — v0.2 introduces a source-annotation requirement that needs a one-time migration.
+> **Upgrading from v0.1.0-alpha?** Read the [upgrade guide](upgrade.md) first. v0.2 changes three things that matter to existing installs: the default `sourceMode` flips from `permissive` to `allowlist` (sources need an opt-in annotation), Kubernetes Events now use `events.k8s.io/v1` instead of the legacy `core/v1` (alerting rules need updating), and `Projection.spec.destination` gains the mutually-exclusive `namespaceSelector` field. The migration script at `hack/migrate-to-v1.sh` handles the annotation rollout.
 
 ## Prerequisites
 
@@ -16,14 +16,14 @@ This walks through installing the `projection` operator and creating your first 
 
 ```bash
 helm install projection oci://ghcr.io/be0x74a/charts/projection \
-  --version 0.1.0-alpha \
+  --version 0.1.0-alpha.1 \
   --namespace projection-system --create-namespace
 ```
 
 ### Option 2 — `kubectl apply`
 
 ```bash
-kubectl apply -f https://github.com/be0x74a/projection/releases/download/v0.1.0-alpha/install.yaml
+kubectl apply -f https://github.com/be0x74a/projection/releases/download/v0.1.0-alpha.1/install.yaml
 ```
 
 Either way, verify the operator is healthy:
@@ -165,7 +165,7 @@ kubectl get configmap -n tenant-a app-config -o jsonpath='{.data.log_level}'
 # → debug
 ```
 
-Propagation goes through the dynamic source watch registered on the first reconcile, so the round trip is typically well under 200 ms.
+Propagation goes through the dynamic source watch registered on the first reconcile, so the round trip is typically well under 200 ms. For selector-based fan-out (`destination.namespaceSelector`) the controller writes destinations in parallel with a concurrency cap of 16, so one source edit propagates to many namespaces in roughly the same time as a single destination would take.
 
 ## The `Ready` condition
 
@@ -235,17 +235,39 @@ The operator could find the GVR but not the object. Check that `spec.source.{api
 
 ### `Ready=False reason=SourceResolutionFailed`
 
-The apiserver doesn't know the Kind. Typo in `apiVersion`/`kind`, or a CRD that isn't installed yet.
+The apiserver doesn't know the Kind. Typo in `apiVersion`/`kind`, a CRD that isn't installed yet, or the source Kind is **cluster-scoped** (`Namespace`, `ClusterRole`, `StorageClass`, …) — `projection` only mirrors namespaced resources and rejects cluster-scoped Kinds with a clear message. Bare `*` is also rejected; use `<group>/*` for the unpinned form.
+
+### `Ready=False reason=SourceDeleted`
+
+The source object returned 404 from the apiserver. Every destination owned by this Projection has been cleaned up automatically; the Projection itself is left in place so you can recreate the source later (recreating it triggers a fresh reconcile that re-projects). If you intended to remove the Projection too, `kubectl delete projection <name>` — the finalizer will short-circuit the cleanup since destinations are already gone.
+
+### `Ready=False reason=SourceNotProjectable`
+
+The controller is in the default `allowlist` mode and the source object lacks `projection.be0x74a.io/projectable: "true"`. Annotate the source, or switch the operator to `permissive` mode (Helm value `sourceMode: permissive`).
+
+### `Ready=False reason=SourceOptedOut`
+
+The source carries `projection.be0x74a.io/projectable: "false"` — the source owner has explicitly vetoed projection. The destination, if one existed, has been garbage-collected. Honor the veto, or coordinate with the source owner.
+
+### `Ready=False reason=NamespaceResolutionFailed`
+
+A `destination.namespaceSelector` failed to evaluate (e.g. malformed selector, RBAC issue listing namespaces). Inspect the condition message for detail.
+
+### `Ready=False reason=InvalidSpec`
+
+`destination.namespace` and `destination.namespaceSelector` are both set. They are mutually exclusive — pick one. CEL admission rejects this on apiserver versions ≥ 1.32; on older apiservers the reconciler catches it as a defense-in-depth.
 
 ### Destination has stale data
 
-Check the `Updated` / `Projected` events:
+Check the `Updated` / `Projected` events. v0.2 writes Events through `events.k8s.io/v1` rather than the legacy `core/v1`:
 
 ```bash
-kubectl -n <projection-ns> get events \
-  --field-selector involvedObject.name=<projection-name> \
-  --sort-by=.lastTimestamp
+kubectl -n <projection-ns> get events.events.k8s.io \
+  --field-selector regarding.name=<projection-name>,regarding.kind=Projection \
+  --sort-by=.metadata.creationTimestamp
 ```
+
+Each event carries an `action` verb (`Create`/`Update`/`Delete`/`Get`/`Validate`/`Resolve`/`Write`) alongside the `reason` — visible via `-o wide` or `-o yaml`.
 
 If the last event is recent and the destination still looks wrong, the controller's diff-skip logic may consider it already in sync — see the `needsUpdate` behavior in [Concepts](concepts.md#6-reconcile-lifecycle).
 
