@@ -23,7 +23,7 @@ The fields of `Projection.spec` and `Projection.status` listed in [`crd-referenc
 | Key                                             | Writer     | Meaning                                                                                      |
 | ----------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------- |
 | `projection.be0x74a.io/owned-by`                | controller | Destination bookkeeping: `<projection-namespace>/<projection-name>`. The controller refuses to overwrite objects lacking this annotation. |
-| `projection.be0x74a.io/owned-by-uid` (label)    | controller | Destination bookkeeping: Projection UID. Enables cluster-wide owned-object listing. |
+| `projection.be0x74a.io/owned-by-uid` (label)    | controller | Destination bookkeeping: the value is the owning Projection's `metadata.uid` (RFC-4122 UUID, 36 chars). Enables cluster-wide owned-object listing via `List(LabelSelector)`. |
 | `projection.be0x74a.io/projectable`             | source owner | Opt-in / opt-out policy gate. **Strictly binary:** `"true"` = opt-in, `"false"` = veto, any other value (including missing or empty string) = "not opted in" under `allowlist` mode / "projectable by default" under `permissive` mode. Source-owner vetoes (`"false"`) are always honored regardless of mode. |
 | `projection.be0x74a.io/finalizer`               | controller | Finalizer on the Projection CR. Cleans up destinations on deletion. |
 
@@ -39,7 +39,11 @@ Three condition types on `Projection.status.conditions`:
 
 **Condition reasons:** the list documented in [`observability.md`](observability.md#reasons-youll-see) is permanent. New reasons may be added without a breaking change; consumers should tolerate unknown reason strings. Existing reasons will not be renamed or have their meaning changed.
 
+The success-side reason strings, called out for automation that switches on them: `Resolved` (on `SourceResolved=True`) and `Projected` (on `DestinationWritten=True` and `Ready=True`).
+
 ### Events
+
+Events are written through the **`events.k8s.io/v1`** API. This wire format is part of the v1 commitment — consumers can rely on `events.k8s.io/v1` semantics (the `regarding` field, the `action` field, the deduplication-via-series model) and on the `kubectl get events.events.k8s.io --field-selector regarding.name=...` query shape working across all v1.x releases.
 
 Event `reason` strings documented in [`observability.md`](observability.md#2-kubernetes-events) are permanent (same rules as condition reasons). Event `action` verbs (`Create`, `Update`, `Delete`, `Get`, `Validate`, `Resolve`, `Write`) are permanent. New events may be added.
 
@@ -64,7 +68,7 @@ Flags inherited from the kubebuilder scaffold (`--metrics-bind-address`, `--lead
 
 ### RBAC
 
-The operator's default `ClusterRole` grants `resources="*"` / `verbs="*"` because a Projection targets any Kind. This default is stable. The optional `supportedKinds` Helm value narrows RBAC without changing the default — additive, non-breaking.
+The operator's default `ClusterRole` grants `resources="*"` / `verbs="*"` because a Projection targets any Kind. This default is stable. The optional `supportedKinds` Helm value narrows RBAC without changing the default — additive, non-breaking. The accepted shapes are stable: `supportedKinds: [{apiGroup, resources}]` with the v1.x semantics described in [`security.md`](security.md#1-narrow-the-controllers-rbac-to-the-kinds-you-actually-mirror), including the `supportedKinds: []` inert mode (controller has no access beyond its own `Projection` CRs). Helm chart values themselves are tracked under the chart's own semver (see [What is NOT covered](#what-is-not-covered)) — the *behavior* of `supportedKinds` is a v1 commitment, the chart-key name is not.
 
 ## What is NOT covered
 

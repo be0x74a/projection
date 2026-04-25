@@ -3,7 +3,7 @@
 This page covers cross-field invariants, controller-side condition reasons, the finalizer/annotation the operator manages, and fully worked YAML examples for `projection.be0x74a.io/v1` `Projection`. For the field-by-field API schema — types, validation rules, defaults — see the auto-generated [API reference](api-reference.md), which is regenerated from `api/v1/projection_types.go` by `make docs-ref` and verified in CI.
 
 - **API group**: `projection.be0x74a.io`
-- **API version**: `v1` (storage version; alpha stability — see [Limitations](limitations.md))
+- **API version**: `v1` (storage version; stability commitments documented in [API stability](api-stability.md))
 - **Kind**: `Projection`
 - **Scope**: Namespaced
 
@@ -69,7 +69,7 @@ The standard `metav1.Condition` array. The controller maintains three condition 
 
 | Type                 | True reason(s)       | False reason(s)                                                                                                   | Unknown reason(s)       |
 | -------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `SourceResolved`     | `Resolved`           | `SourceResolutionFailed` (RESTMapper can't find Kind), `SourceFetchFailed` (transient fetch error), `SourceDeleted` (source 404 — owned destinations cleaned up) | —                       |
+| `SourceResolved`     | `Resolved`           | `SourceResolutionFailed` (RESTMapper can't find Kind, cluster-scoped Kind, or bare `*`), `SourceFetchFailed` (transient fetch error), `SourceDeleted` (source 404 — owned destinations cleaned up), `SourceOptedOut` (source has `projectable="false"`), `SourceNotProjectable` (allowlist mode, source missing `projectable="true"`) | —                       |
 | `DestinationWritten` | `Projected`          | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`, `NamespaceResolutionFailed`, `DestinationWriteFailed`, `InvalidSpec` | `SourceNotResolved`     |
 | `Ready`              | `Projected`          | Mirrors whichever of `SourceResolved` or `DestinationWritten` failed, with the same reason and message            | —                       |
 
@@ -84,14 +84,17 @@ For selector-based Projections, `DestinationWritten` is a rollup across all matc
 
 `kubectl get projections` (and `-A`) surfaces:
 
-| Column             | JSONPath                                                     |
-| ------------------ | ------------------------------------------------------------ |
-| `Kind`             | `.spec.source.kind`                                          |
-| `Source-Namespace` | `.spec.source.namespace`                                     |
-| `Source-Name`      | `.spec.source.name`                                          |
-| `Destination`      | `.spec.destination.name`                                     |
-| `Ready`            | `.status.conditions[?(@.type=='Ready')].status`              |
-| `Age`              | `.metadata.creationTimestamp`                                |
+| Column                 | JSONPath                                                     | Default? |
+| ---------------------- | ------------------------------------------------------------ | -------- |
+| `Kind`                 | `.spec.source.kind`                                          | yes      |
+| `Source-Namespace`     | `.spec.source.namespace`                                     | yes      |
+| `Source-Name`          | `.spec.source.name`                                          | yes      |
+| `Destination`          | `.spec.destination.name`                                     | yes      |
+| `Destination-Selector` | `.spec.destination.namespaceSelector.matchLabels`            | with `-o wide` (priority=1) |
+| `Ready`                | `.status.conditions[?(@.type=='Ready')].status`              | yes      |
+| `Age`                  | `.metadata.creationTimestamp`                                | yes      |
+
+The CRD also exposes the short name `proj`, so `kubectl get proj` works as a shorthand for `kubectl get projections`.
 
 ## Finalizers and annotations the controller manages
 
@@ -99,6 +102,23 @@ For selector-based Projections, `DestinationWritten` is a rollup across all matc
 | ----------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------ |
 | `projection.be0x74a.io/finalizer`         | `Projection.metadata`  | Blocks deletion until the controller has cleaned up the destination object (if it still owns it). |
 | `projection.be0x74a.io/owned-by`          | Destination annotations | Marks the destination as owned by `<projection-ns>/<projection-name>`. Used for conflict detection on every reconcile and before destination cleanup. |
+| `projection.be0x74a.io/owned-by-uid`      | Destination labels      | The owning Projection's `metadata.uid`. Lets cleanup paths find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking namespaces. The annotation above is still verified after the label-driven list as a belt-and-braces guard. |
+| `projection.be0x74a.io/projectable`       | Source annotations *(read by controller, written by source owners)* | Source-side opt-in/veto. `"true"` = opt-in (required under default `sourceMode=allowlist`). `"false"` = veto (always honored regardless of mode; flipping a previously-projected source to `"false"` garbage-collects the destination). Any other value is treated as "not opted in" under allowlist, "projectable by default" under permissive. |
+
+## Stripped fields by Kind
+
+Some Kinds carry apiserver-allocated spec fields the controller strips before writing the destination. These fields would either be rejected on create (`spec.clusterIP: field is immutable`) or carry meaningless values across namespaces. The current set:
+
+| Kind                                  | Stripped fields                                                                                                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `v1/Service`                          | `spec.clusterIP`, `spec.clusterIPs`, `spec.ipFamilies`, `spec.ipFamilyPolicy`                                                                                             |
+| `v1/PersistentVolumeClaim`            | `spec.volumeName`                                                                                                                                                         |
+| `v1/Pod`                              | `spec.nodeName`                                                                                                                                                           |
+| `batch/v1/Job`                        | `spec.selector`, plus the auto-generated `controller-uid` / `batch.kubernetes.io/controller-uid` / `batch.kubernetes.io/job-name` labels on `spec.template.metadata.labels`. Jobs created with `spec.manualSelector: true` are a known limitation — the controller's stripping logic assumes the apiserver-managed selector path. |
+
+On update, the controller copies these fields from the existing destination back onto the desired object before issuing the `Update`, so an `Update` of a `Service` whose `clusterIP` we stripped at build time isn't rejected for trying to clear an immutable field.
+
+If you hit `field is immutable` errors for a Kind not in the table above, the controller is likely missing an entry in `droppedSpecFieldsByGVK` — see [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-kind-to-droppedspecfieldsbygvk) for the path to add one, and please [open an issue](https://github.com/be0x74a/projection/issues/new).
 
 ## Fully-spelled-out example
 
