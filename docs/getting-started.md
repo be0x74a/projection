@@ -196,6 +196,29 @@ kubectl -n tenant-a get configmap app-config
 
 The finalizer `projection.be0x74a.io/finalizer` is what guarantees this cleanup.
 
+## Uninstalling the operator
+
+Order matters. The controller is the only thing that can clear its own finalizer from each Projection — uninstall it before the Projections are gone and they'll get stuck in `Terminating`, which in turn blocks `kubectl delete crd` until you intervene by hand.
+
+```bash
+# 1. Delete every Projection across all namespaces. The controller cleans up
+#    each owned destination as the finalizer runs.
+kubectl delete projection --all -A
+
+# 2. Confirm they're really gone (the finalizer can take a moment).
+kubectl get projection -A
+# No resources found.
+
+# 3. Uninstall the operator.
+helm uninstall projection -n projection-system
+# (Or, for the install.yaml path: kubectl delete -f install.yaml)
+
+# 4. Helm 3 does not delete CRDs on uninstall. Remove it explicitly:
+kubectl delete crd projections.projection.be0x74a.io
+```
+
+Already uninstalled out of order and your CRD delete is hanging? See [CRD deletion is stuck after `helm uninstall`](#crd-deletion-is-stuck-after-helm-uninstall).
+
 ## Debugging helper
 
 The repo ships a one-shot snapshot script that dumps operator logs, events, projection statuses, and (optionally) the source/destination objects:
@@ -270,6 +293,25 @@ kubectl -n <projection-ns> get events.events.k8s.io \
 Each event carries an `action` verb (`Create`/`Update`/`Delete`/`Get`/`Validate`/`Resolve`/`Write`) alongside the `reason` — visible via `-o wide` or `-o yaml`.
 
 If the last event is recent and the destination still looks wrong, the controller's diff-skip logic may consider it already in sync — see the `needsUpdate` behavior in [Concepts](concepts.md#6-reconcile-lifecycle).
+
+### CRD deletion is stuck after `helm uninstall`
+
+`kubectl delete crd projections.projection.be0x74a.io` hangs. Cause: one or more Projection CRs still carry `projection.be0x74a.io/finalizer`, and the controller — the only thing that can remove it — was uninstalled before they were cleaned up. The apiserver waits for every instance to terminate before deleting the CRD, and the instances cannot terminate without the controller.
+
+Strip the finalizer from every remaining Projection by hand:
+
+```bash
+kubectl get projection -A -o name | \
+  xargs -I {} kubectl patch {} --type=merge -p '{"metadata":{"finalizers":[]}}'
+```
+
+Then re-issue the CRD delete:
+
+```bash
+kubectl delete crd projections.projection.be0x74a.io
+```
+
+This bypass skips the destination-cleanup the finalizer normally runs, so any destinations the Projections previously created stay in place — owned by nothing. Garbage-collect them by hand if you want them gone. To avoid this in future, follow the order in [Uninstalling the operator](#uninstalling-the-operator).
 
 ## Next
 
