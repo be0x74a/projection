@@ -17,8 +17,7 @@
 #
 # See docs/upgrade.md for the broader migration guide.
 
-set -u
-set -o pipefail
+set -euo pipefail
 
 readonly ANNOTATION='projection.be0x74a.io/projectable'
 APPLY=false
