@@ -635,10 +635,10 @@ func (r *ProjectionReconciler) deleteOneDestination(ctx context.Context, proj *p
 // namespaces). The annotation is still checked as a belt-and-braces
 // ownership guard in case a stranger has manually set the label.
 func (r *ProjectionReconciler) deleteAllOwnedDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource) error {
-	ownerValue := proj.Namespace + "/" + proj.Name
+	ownerValue := ownerKey(proj)
 
 	owned, err := r.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", ownedByUIDLabel, proj.UID),
+		LabelSelector: ownedByUIDSelector(proj),
 	})
 	if err != nil {
 		return fmt.Errorf("listing owned destinations: %w", err)
@@ -725,10 +725,10 @@ func (r *ProjectionReconciler) cleanupStaleDestinations(ctx context.Context, pro
 	if proj.Spec.Destination.NamespaceSelector == nil {
 		return nil
 	}
-	ownerValue := proj.Namespace + "/" + proj.Name
+	ownerValue := ownerKey(proj)
 
 	owned, err := r.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", ownedByUIDLabel, proj.UID),
+		LabelSelector: ownedByUIDSelector(proj),
 	})
 	if err != nil {
 		return fmt.Errorf("listing owned destinations for stale cleanup: %w", err)
@@ -771,8 +771,22 @@ func destinationCoords(proj *projectionv1.Projection) (namespace, name string) {
 	return
 }
 
+// ownerKey returns the namespaced ownership identifier stamped on each
+// destination via ownedByAnnotation.
+func ownerKey(proj *projectionv1.Projection) string {
+	return proj.Namespace + "/" + proj.Name
+}
+
+// ownedByUIDSelector returns the label selector that matches every destination
+// owned by proj. The label value is the Projection's UID rather than its name
+// so a delete-recreate cycle can't shadow stale destinations of a prior
+// incarnation.
+func ownedByUIDSelector(proj *projectionv1.Projection) string {
+	return fmt.Sprintf("%s=%s", ownedByUIDLabel, proj.UID)
+}
+
 func isOwnedBy(obj *unstructured.Unstructured, proj *projectionv1.Projection) bool {
-	return obj.GetAnnotations()[ownedByAnnotation] == proj.Namespace+"/"+proj.Name
+	return obj.GetAnnotations()[ownedByAnnotation] == ownerKey(proj)
 }
 
 // checkSourceProjectable decides whether a freshly-fetched source object is
@@ -1000,7 +1014,7 @@ func buildDestination(source *unstructured.Unstructured, proj *projectionv1.Proj
 	for k, v := range proj.Spec.Overlay.Annotations {
 		annotations[k] = v
 	}
-	annotations[ownedByAnnotation] = proj.Namespace + "/" + proj.Name
+	annotations[ownedByAnnotation] = ownerKey(proj)
 	dst.SetAnnotations(annotations)
 
 	lbls := dst.GetLabels()
