@@ -51,6 +51,10 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 update-crd-golden: manifests
 	go test ./api/v1/... -run TestCRDGolden -update
 
+.PHONY: sync-chart-crds
+sync-chart-crds: manifests ## Copy generated CRDs into the Helm chart's crds/ directory.
+	cp config/crd/bases/projection.be0x74a.io_projections.yaml charts/projection/crds/projections.projection.be0x74a.io.yaml
+
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."

@@ -219,3 +219,24 @@ jobs:
             echo "::error::Run 'make docs-ref' locally and commit the result."
             exit 1
           fi
+
+  chart-crd-drift:
+    name: Chart CRD drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: 1.25.x
+          cache: true
+      - name: Sync chart CRDs
+        run: make sync-chart-crds
+      - name: Fail on drift
+        run: |
+          if ! git diff --exit-code charts/projection/crds/; then
+            echo "::error::charts/projection/crds/ is out of sync with config/crd/bases/."
+            echo "::error::Run 'make sync-chart-crds' locally and commit the result."
+            exit 1
+          fi
