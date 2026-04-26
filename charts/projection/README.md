@@ -124,6 +124,18 @@ multiple releases.
 | `sourceMode`                        | `allowlist`                   | Source projectability policy. `allowlist` requires source objects to carry `projection.be0x74a.io/projectable="true"`; `permissive` allows any source unless explicitly opted out. See [docs/concepts.md](../../docs/concepts.md). |
 | `supportedKinds`                    | `[{apiGroup: "*", resources: ["*"]}]` | RBAC scope for the controller's ClusterRole. Default preserves pre-v0.2 cluster-admin-equivalent access. Replace with an explicit list to narrow; `[]` grants nothing beyond Projection CRs. See [docs/security.md](../../docs/security.md). |
 
+## Values validation
+
+The chart ships a `values.schema.json` that Helm consults during `install`, `upgrade`, `lint`, and `template`. Malformed overrides — typos at the top level (e.g. `replicaCounts` instead of `replicaCount`), wrong types, or `supportedKinds` entries missing the required `apiGroup`/`resources` fields — fail with a clear pre-install error instead of silently using defaults.
+
+Editors with JSON-schema support also pick this up. For VS Code with `redhat.vscode-yaml`, the schema can be associated explicitly via a [modeline](https://github.com/redhat-developer/vscode-yaml#using-inlined-schema) at the top of your overrides file:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/be0x74a/projection/main/charts/projection/values.schema.json
+```
+
+Schema strictness is pragmatic: top-level and chart-defined nested keys are locked down (`additionalProperties: false`) so typos surface early; pass-through Kubernetes shapes (`nodeSelector`, `tolerations`, `affinity`, `securityContext.{pod,container}` contents, `networkPolicy.extraEgress[]`, `serviceMonitor.tlsConfig`) stay opaque — the API server validates those authoritatively.
+
 ## Example
 
 ```yaml

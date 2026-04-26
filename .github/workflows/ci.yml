@@ -194,6 +194,8 @@ jobs:
         run: helm plugin install --verify=false --version v1.0.3 https://github.com/helm-unittest/helm-unittest
       - name: Lint chart
         run: helm lint charts/projection
+      - name: Run schema negative test
+        run: bash charts/projection/tests/schema-negative.sh
       - name: Run chart tests
         run: helm unittest charts/projection
 
