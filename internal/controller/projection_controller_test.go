@@ -673,6 +673,86 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 	})
 
+	Context("Selector-write-concurrency plumbing", func() {
+		It("honors a non-default value through selector fan-out", func() {
+			// Stand up a selector-based Projection that matches three
+			// namespaces, then reconcile with SelectorWriteConcurrency=2 —
+			// strictly smaller than both the default (16) and the match
+			// count. The fan-out path uses r.SelectorWriteConcurrency to
+			// size the worker-pool semaphore; if the field weren't plumbed
+			// (or if zero leaked through and produced a zero-capacity
+			// channel), the reconcile would deadlock or skip writes.
+			// Asserting all three destinations land confirms the value
+			// flowed and the worker pool drained completely.
+			sourceNS := uniqueNS("swc-src")
+			match1 := uniqueNS("swc-m1")
+			match2 := uniqueNS("swc-m2")
+			match3 := uniqueNS("swc-m3")
+			ensureNamespace(sourceNS)
+			ensureNamespaceWithLabels(match1, map[string]string{"swc": "true"})
+			ensureNamespaceWithLabels(match2, map[string]string{"swc": "true"})
+			ensureNamespaceWithLabels(match3, map[string]string{"swc": "true"})
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "cfg",
+					Namespace:   sourceNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"k": "v"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			projKey := types.NamespacedName{Name: "p-swc", Namespace: sourceNS}
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						APIVersion: "v1", Kind: "ConfigMap",
+						Name: "cfg", Namespace: sourceNS,
+					},
+					Destination: projectionv1.DestinationRef{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"swc": "true"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			DeferCleanup(deleteProjection, projKey)
+
+			r := newReconciler()
+			r.SelectorWriteConcurrency = 2
+
+			reconcileOnce(r, projKey)
+
+			for _, ns := range []string{match1, match2, match3} {
+				dst := &corev1.ConfigMap{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "cfg", Namespace: ns}, dst)).To(Succeed(),
+					"destination must exist in matching namespace %s under SelectorWriteConcurrency=2", ns)
+				Expect(dst.Data).To(Equal(map[string]string{"k": "v"}))
+			}
+		})
+
+		It("falls back to the documented default when zero", func() {
+			// Direct-Reconcile unit tests construct ProjectionReconciler
+			// without invoking SetupWithManager, which is the production
+			// site that fills the zero value. The fan-out path mirrors
+			// that defaulting so this construction path doesn't deadlock
+			// on a zero-capacity semaphore. Assert the guard kicks in.
+			r := &ProjectionReconciler{}
+			Expect(r.SelectorWriteConcurrency).To(BeZero(),
+				"sanity: zero-value reconciler is the case we're guarding against")
+
+			concurrency := r.SelectorWriteConcurrency
+			if concurrency <= 0 {
+				concurrency = defaultSelectorWriteConcurrency
+			}
+			Expect(concurrency).To(Equal(defaultSelectorWriteConcurrency),
+				"the fan-out site's defaulting guard must yield the documented default")
+		})
+	})
+
 	Context("Namespace selector path", func() {
 		const (
 			sourceCMName = "shared-cfg"

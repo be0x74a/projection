@@ -63,6 +63,7 @@ type runtimeConfig struct {
 	sourceModeFlag              string
 	requeueInterval             time.Duration
 	leaderElectionLeaseDuration time.Duration
+	selectorWriteConcurrency    int
 }
 
 // bindFlags registers projection's CLI flags on the given FlagSet and
@@ -98,6 +99,16 @@ func bindFlags(fs *flag.FlagSet) *runtimeConfig {
 			"faster failover on leader crash; longer values reduce apiserver "+
 			"churn from lease renewals. Must remain strictly greater than the "+
 			"controller-runtime renew-deadline default (10s).")
+	fs.IntVar(&c.selectorWriteConcurrency, "selector-write-concurrency", 16,
+		"Maximum in-flight destination writes per selector-based Projection "+
+			"during fan-out. Each worker issues a Get plus optionally a "+
+			"Create or Update against the apiserver; HTTP/2 multiplexing in "+
+			"client-go shares a single connection across the workers, so "+
+			"this caps parallelism rather than connections. The default of "+
+			"16 fits comfortably within typical kube-apiserver APF priority-"+
+			"level budgets at production scale; raise it for Projections "+
+			"matching thousands of namespaces, lower it on apiserver-"+
+			"constrained clusters. Must be > 0.")
 	return c
 }
 
@@ -197,13 +208,28 @@ func main() {
 		os.Exit(1)
 	}
 	setupLog.Info("source projectability policy", "source-mode", sourceMode)
+	if cfg.selectorWriteConcurrency <= 0 {
+		setupLog.Error(nil, "invalid --selector-write-concurrency; must be > 0",
+			"value", cfg.selectorWriteConcurrency)
+		os.Exit(1)
+	}
+	if cfg.selectorWriteConcurrency > 256 {
+		// No hard ceiling — apiserver APF budgets and client-go connection
+		// pool size both ultimately bound throughput more than this knob —
+		// but values this high are unusual enough to warn so operators can
+		// confirm the choice was deliberate.
+		setupLog.Info("--selector-write-concurrency is unusually high; "+
+			"verify the apiserver can absorb the parallel write load",
+			"value", cfg.selectorWriteConcurrency)
+	}
 	if err = (&controller.ProjectionReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		DynamicClient:   dynamicClient,
-		RESTMapper:      mgr.GetRESTMapper(),
-		SourceMode:      sourceMode,
-		RequeueInterval: cfg.requeueInterval,
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		DynamicClient:            dynamicClient,
+		RESTMapper:               mgr.GetRESTMapper(),
+		SourceMode:               sourceMode,
+		RequeueInterval:          cfg.requeueInterval,
+		SelectorWriteConcurrency: cfg.selectorWriteConcurrency,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Projection")
 		os.Exit(1)

@@ -120,6 +120,7 @@ multiple releases.
 | `podDisruptionBudget.maxUnavailable`| `null`                        | Max pods unavailable. Leave null when using minAvailable.                   |
 | `requeueInterval`                   | `30s`                         | Requeue cadence for reconciliation. See observability.md for tuning guidance. |
 | `leaderElection.leaseDuration`      | `15s`                         | Leader-election lease duration. Only effective when `leaderElection.enabled=true`. |
+| `selectorWriteConcurrency`          | `16`                          | Per-Projection in-flight destination-write cap during selector fan-out. Must be > 0. Raise for selectors matching thousands of namespaces; lower on apiserver-constrained clusters. See [docs/observability.md](../../docs/observability.md) for the rationale. |
 | `sourceMode`                        | `allowlist`                   | Source projectability policy. `allowlist` requires source objects to carry `projection.be0x74a.io/projectable="true"`; `permissive` allows any source unless explicitly opted out. See [docs/concepts.md](../../docs/concepts.md). |
 | `supportedKinds`                    | `[{apiGroup: "*", resources: ["*"]}]` | RBAC scope for the controller's ClusterRole. Default preserves pre-v0.2 cluster-admin-equivalent access. Replace with an explicit list to narrow; `[]` grants nothing beyond Projection CRs. See [docs/security.md](../../docs/security.md). |
 

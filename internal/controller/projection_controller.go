@@ -77,17 +77,11 @@ const (
 	selectorIndex      = "spec.hasNamespaceSelector"
 	selectorIndexValue = "true"
 
-	// selectorWriteConcurrency bounds the number of in-flight destination
-	// writes during selector-based fan-out. Each worker issues a Get plus
-	// (optionally) a Create or Update against the apiserver; HTTP/2
-	// multiplexing in client-go lets many of these share a single
-	// connection, but we cap the parallelism so a Projection matching
-	// thousands of namespaces can't DoS the apiserver or blow out
-	// controller memory with goroutines. 16 is a conservative default
-	// that comfortably fits within kube-apiserver APF budgets at
-	// production scale; a follow-up can make this configurable via flag
-	// if operators report a need.
-	selectorWriteConcurrency = 16
+	// defaultSelectorWriteConcurrency is the default value for the
+	// per-Projection in-flight destination-write cap during selector-based
+	// fan-out. See ProjectionReconciler.SelectorWriteConcurrency for the
+	// runtime override and the rationale for the cap itself.
+	defaultSelectorWriteConcurrency = 16
 )
 
 // nsFailure records a single per-namespace destination-write failure during
@@ -134,6 +128,21 @@ type ProjectionReconciler struct {
 	// (SetupWithManager fills the zero value so unit-test constructions
 	// don't need to set it explicitly).
 	RequeueInterval time.Duration
+
+	// SelectorWriteConcurrency bounds the number of in-flight destination
+	// writes during selector-based fan-out. Each worker issues a Get plus
+	// (optionally) a Create or Update against the apiserver; HTTP/2
+	// multiplexing in client-go lets many of these share a single
+	// connection, but we cap the parallelism so a Projection matching
+	// thousands of namespaces can't DoS the apiserver or blow out
+	// controller memory with goroutines. Configured via the
+	// --selector-write-concurrency CLI flag (Helm value
+	// selectorWriteConcurrency). Defaults to defaultSelectorWriteConcurrency
+	// when unset; SetupWithManager fills the zero value so unit-test
+	// constructions don't need to set it explicitly, and the fan-out site
+	// guards the same default so direct-Reconcile unit tests that bypass
+	// SetupWithManager don't deadlock on a zero-capacity semaphore.
+	SelectorWriteConcurrency int
 
 	// Controller is the underlying controller.Controller we built in
 	// SetupWithManager. We need it so Reconcile can register new source
@@ -319,12 +328,19 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// matching 100 namespaces spends ~350ms of reconcile time waiting on
 	// the apiserver. HTTP/2 multiplexing handles the concurrency at the
 	// transport level; we just need to hand it enough work in parallel.
-	// The semaphore caps concurrency at selectorWriteConcurrency so we
+	// The semaphore caps concurrency at SelectorWriteConcurrency so we
 	// don't DoS the apiserver with a selector matching thousands of
-	// namespaces. `mu` guards the two accumulators; contention is minimal
-	// (tens of microseconds per reconcile in aggregate), so a single
-	// mutex is preferred over sharded accumulators.
-	sem := make(chan struct{}, selectorWriteConcurrency)
+	// namespaces. The non-positive guard mirrors SetupWithManager's
+	// defaulting so unit tests that bypass it (constructing a reconciler
+	// directly) don't deadlock on a zero-capacity channel. `mu` guards
+	// the two accumulators; contention is minimal (tens of microseconds
+	// per reconcile in aggregate), so a single mutex is preferred over
+	// sharded accumulators.
+	concurrency := r.SelectorWriteConcurrency
+	if concurrency <= 0 {
+		concurrency = defaultSelectorWriteConcurrency
+	}
+	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, targetNS := range destNamespaces {
@@ -1042,6 +1058,9 @@ func (r *ProjectionReconciler) mapNamespace(ctx context.Context, _ client.Object
 func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.RequeueInterval == 0 {
 		r.RequeueInterval = 30 * time.Second
+	}
+	if r.SelectorWriteConcurrency <= 0 {
+		r.SelectorWriteConcurrency = defaultSelectorWriteConcurrency
 	}
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, sourceIndex,
 		func(obj client.Object) []string {

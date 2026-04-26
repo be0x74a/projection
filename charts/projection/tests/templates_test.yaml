@@ -99,6 +99,22 @@ tests:
           path: spec.template.spec.containers[0].args
           content: --requeue-interval=30s
 
+  - it: passes --selector-write-concurrency to the controller (default 16)
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --selector-write-concurrency=16
+
+  - it: honors a non-default selectorWriteConcurrency
+    template: deployment.yaml
+    set:
+      selectorWriteConcurrency: 64
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --selector-write-concurrency=64
+
   - it: passes --leader-election-lease-duration by default (leader election enabled)
     template: deployment.yaml
     asserts:
