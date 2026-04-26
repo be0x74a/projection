@@ -4,6 +4,8 @@ One entry per failure-mode condition reason you may see on a `Projection`. Healt
 
 Every entry assumes you have already located the failing condition. If you haven't, start at [observability.md](observability.md#reasons-youll-see) to learn how to read conditions and events, then come back via the reason link.
 
+For operator install/uninstall issues that are not Projection-condition failures (e.g. a `kubectl delete crd` that hangs after `helm uninstall`), see the [Troubleshooting section of the getting-started guide](getting-started.md#troubleshooting) — those are operator-lifecycle issues rather than per-Projection conditions, so they live with the install/uninstall procedure.
+
 ## Contents
 
 **`SourceResolved` failures** — the controller could not locate or validate your source object:
