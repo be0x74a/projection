@@ -791,10 +791,12 @@ func isOwnedBy(obj *unstructured.Unstructured, proj *projectionv1.Projection) bo
 
 // checkSourceProjectable decides whether a freshly-fetched source object is
 // allowed to be projected, based on the configured SourceMode and the
-// source's projectable annotation.
+// source's projectable annotation. The annotation is evaluated *before* the
+// mode, so a hard "false" veto by the source owner is honored under every
+// mode.
 //
-//   - Annotation = "false" is always a veto, regardless of mode. This is the
-//     source owner's escape hatch.
+//   - Annotation = "false" is always a veto, regardless of mode (escape
+//     hatch — short-circuits before the mode check below).
 //   - Annotation = "true" always allows projection.
 //   - Anything else (missing, empty, other string): blocked under
 //     SourceModeAllowlist (the default), allowed under SourceModePermissive.
