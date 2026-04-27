@@ -11,6 +11,12 @@
 [![License](https://img.shields.io/github/license/be0x74a/projection)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/be0x74a/projection.svg)](https://pkg.go.dev/github.com/be0x74a/projection)
 
+<p align="center">
+  <a href="docs/assets/demo.cast">
+    <img src="docs/assets/demo.gif" alt="projection demo: apply a Projection, edit the source, watch the destination ConfigMap update in ~100ms" width="720">
+  </a>
+</p>
+
 `projection` is a Kubernetes operator that mirrors any Kubernetes object — `ConfigMap`, `Secret`, `Service`, your custom resources — from a source location to a destination, declaratively, per resource. Each `Projection` CR is its own first-class object with status conditions, events, and a metric you can alert on. Edits to the source propagate to the destination in roughly **100 milliseconds**.
 
 It exists because every team eventually rebuilds this with a one-off controller or a Kyverno `generate` policy, and neither approach is the right shape. `projection` is meant to be the answer when somebody asks "how do you mirror a `Secret` across namespaces in this cluster?"
