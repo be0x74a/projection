@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <rect width="1280" height="640" fill="#FFFFFF"/>
+
+  <svg x="140" y="140" width="360" height="360" viewBox="0 0 200 200">
+    <line x1="100" y1="67.09" x2="100" y2="25" stroke="#326CE5" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="71.48" y1="116.46" x2="35" y2="137.5" stroke="#326CE5" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="128.52" y1="116.46" x2="165" y2="137.5" stroke="#326CE5" stroke-width="2.5" stroke-linecap="round"/>
+    <polygon points="138,100 119,132.91 81,132.91 62,100 81,67.09 119,67.09" fill="#326CE5"/>
+    <polygon points="116,100 108,113.86 92,113.86 84,100 92,86.14 108,86.14" fill="#FFFFFF"/>
+    <polygon points="117,25 108.5,39.72 91.5,39.72 83,25 91.5,10.28 108.5,10.28" fill="#326CE5"/>
+    <polygon points="107,25 103.5,18.94 96.5,18.94 93,25 96.5,31.06 103.5,31.06" fill="#FFFFFF"/>
+    <polygon points="52,137.5 43.5,152.22 26.5,152.22 18,137.5 26.5,122.78 43.5,122.78" fill="#326CE5"/>
+    <polygon points="42,137.5 38.5,131.44 31.5,131.44 28,137.5 31.5,143.56 38.5,143.56" fill="#FFFFFF"/>
+    <polygon points="182,137.5 173.5,152.22 156.5,152.22 148,137.5 156.5,122.78 173.5,122.78" fill="#326CE5"/>
+    <polygon points="172,137.5 168.5,131.44 161.5,131.44 158,137.5 161.5,143.56 168.5,143.56" fill="#FFFFFF"/>
+  </svg>
+
+  <text x="580" y="295" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="120" font-weight="700" fill="#326CE5" letter-spacing="-2">projection</text>
+  <text x="580" y="370" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="40" font-weight="400" fill="#475569">Declarative resource mirroring</text>
+  <text x="580" y="425" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="40" font-weight="400" fill="#475569">across Kubernetes namespaces.</text>
+</svg>
