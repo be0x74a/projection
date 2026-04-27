@@ -1,18 +1,1 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!--
-  projection logo — placeholder.
-  A triangular prism with a beam entering and three colored rays leaving,
-  evoking the operator's behavior: one source projected into multiple forms.
-  Replace with a designed asset before v1.0.
--->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="projection logo">
-  <title>projection</title>
-  <!-- incoming beam -->
-  <line x1="10" y1="100" x2="80" y2="100" stroke="#ffffff" stroke-width="6" stroke-linecap="round" />
-  <!-- prism -->
-  <polygon points="80,40 80,160 180,100" fill="#1f6feb" stroke="#0b3d91" stroke-width="3" stroke-linejoin="round" />
-  <!-- dispersed rays -->
-  <line x1="180" y1="100" x2="200" y2="60"  stroke="#ff6b6b" stroke-width="4" stroke-linecap="round" />
-  <line x1="180" y1="100" x2="200" y2="100" stroke="#ffd93d" stroke-width="4" stroke-linecap="round" />
-  <line x1="180" y1="100" x2="200" y2="140" stroke="#6bcf7f" stroke-width="4" stroke-linecap="round" />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="projection — one source resource mirrored to multiple Kubernetes namespaces"><title>projection</title><line x1="100" y1="67.09" x2="100" y2="25" stroke="#326CE5" stroke-width="2.5" stroke-linecap="round"/><line x1="71.48" y1="116.46" x2="35" y2="137.5" stroke="#326CE5" stroke-width="2.5" stroke-linecap="round"/><line x1="128.52" y1="116.46" x2="165" y2="137.5" stroke="#326CE5" stroke-width="2.5" stroke-linecap="round"/><polygon points="138,100 119,132.91 81,132.91 62,100 81,67.09 119,67.09" fill="#326CE5"/><polygon points="116,100 108,113.86 92,113.86 84,100 92,86.14 108,86.14" fill="#FFFFFF"/><polygon points="117,25 108.5,39.72 91.5,39.72 83,25 91.5,10.28 108.5,10.28" fill="#326CE5"/><polygon points="107,25 103.5,18.94 96.5,18.94 93,25 96.5,31.06 103.5,31.06" fill="#FFFFFF"/><polygon points="52,137.5 43.5,152.22 26.5,152.22 18,137.5 26.5,122.78 43.5,122.78" fill="#326CE5"/><polygon points="42,137.5 38.5,131.44 31.5,131.44 28,137.5 31.5,143.56 38.5,143.56" fill="#FFFFFF"/><polygon points="182,137.5 173.5,152.22 156.5,152.22 148,137.5 156.5,122.78 173.5,122.78" fill="#326CE5"/><polygon points="172,137.5 168.5,131.44 161.5,131.44 158,137.5 161.5,143.56 168.5,143.56" fill="#FFFFFF"/></svg>
