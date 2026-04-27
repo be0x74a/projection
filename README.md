@@ -1,6 +1,12 @@
-# projection
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="projection logo" width="140">
+</p>
 
-> The Kubernetes CRD for declarative resource mirroring across namespaces — any Kind, conflict-safe, watch-driven.
+<h1 align="center">projection</h1>
+
+<p align="center">The Kubernetes CRD for declarative resource mirroring across namespaces — any Kind, conflict-safe, watch-driven.</p>
+
+<p align="center">
 
 [![CI](https://github.com/be0x74a/projection/actions/workflows/ci.yml/badge.svg)](https://github.com/be0x74a/projection/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/be0x74a/projection?include_prereleases&sort=semver)](https://github.com/be0x74a/projection/releases)
@@ -10,6 +16,8 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12533/badge)](https://www.bestpractices.dev/projects/12533)
 [![License](https://img.shields.io/github/license/be0x74a/projection)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/be0x74a/projection.svg)](https://pkg.go.dev/github.com/be0x74a/projection)
+
+</p>
 
 <p align="center">
   <a href="docs/assets/demo.cast">
