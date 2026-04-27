@@ -128,9 +128,20 @@ while IFS=$'\t' read -r api kind ns name; do
 
     printf '%-12s %-14s %-14s %-30s %s\n' "$ns" "$api" "$kind" "$name" "annotate (projectable=true)"
     if $APPLY; then
-        if ! "${KCTL[@]}" -n "$ns" annotate "$resource" "$name" \
-                "${ANNOTATION}=true" --overwrite=false >/dev/null 2>&1; then
-            echo "  -> error annotating $ns/$name" >&2
+        # Capture stderr so we can distinguish a benign concurrent-annotate
+        # race from a real error. The earlier read-check filtered the case
+        # where the annotation existed at start; if `kubectl annotate
+        # --overwrite=false` now reports "already has a value", the source
+        # owner annotated between our check and this apply. Either value
+        # they wrote (true/false) is their choice; we respect it and count
+        # the source as a skip rather than bumping exit_code.
+        if ! annotate_err=$("${KCTL[@]}" -n "$ns" annotate "$resource" "$name" \
+                "${ANNOTATION}=true" --overwrite=false 2>&1); then
+            if [[ "$annotate_err" == *"already has a value"* ]]; then
+                count_skip_exists=$((count_skip_exists + 1))
+                continue
+            fi
+            echo "  -> error annotating $ns/$name: $annotate_err" >&2
             exit_code=1
             continue
         fi
