@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"time"
 )
@@ -27,10 +28,16 @@ func runProfile(ctx context.Context, c *clients, p Profile, metricsURL string) (
 	}
 	time.Sleep(settle)
 
-	// Initial scrape (baseline for CPU delta).
+	// Initial scrape (baseline for CPU delta). Tolerate scrape failure: the
+	// chart defaults to metrics.secure=true (auth-gated /metrics), and the
+	// harness ships without bearer-token wiring — designed for the
+	// `make run` plain-HTTP flow. A scrape failure isn't worth aborting the
+	// whole profile after a long bootstrap; the latency measurement is the
+	// primary signal. CPU/heap/reconcile-time numbers will report as zero.
 	baseline, err := scrapeController(ctx, metricsURL)
 	if err != nil {
-		return nil, fmt.Errorf("baseline scrape: %w", err)
+		fmt.Fprintf(os.Stderr, "warning: baseline scrape failed, controller-side metrics unavailable: %v\n", err)
+		baseline = MetricsSnapshot{}
 	}
 
 	// Measurement window. Selector profiles observe earliest vs slowest
@@ -59,10 +66,11 @@ func runProfile(ctx context.Context, c *clients, p Profile, metricsURL string) (
 		m.E2EP50, m.E2EP95, m.E2EP99 = latency.P50, latency.P95, latency.P99
 	}
 
-	// Final scrape.
+	// Final scrape. Same tolerance rationale as the baseline above.
 	final, err := scrapeController(ctx, metricsURL)
 	if err != nil {
-		return nil, fmt.Errorf("final scrape: %w", err)
+		fmt.Fprintf(os.Stderr, "warning: final scrape failed, controller-side metrics unavailable: %v\n", err)
+		final = MetricsSnapshot{}
 	}
 	m.WatchedGVKs = final.WatchedGVKs
 	m.ControllerHeapMB = final.HeapInuseBytes / 1024 / 1024
