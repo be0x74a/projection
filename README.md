@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="projection logo" width="120">
+</p>
+
 # projection
 
 > The Kubernetes CRD for declarative resource mirroring across namespaces — any Kind, conflict-safe, watch-driven.
