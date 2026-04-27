@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"time"
@@ -157,12 +158,14 @@ type SelectorLatencyResult struct {
 }
 
 // quantiles returns p50/p95/p99 from a sorted duration slice via index lookup.
+// Uses the nearest-rank-with-ceiling estimator so a 30-sample p99 lands on the
+// 30th item (index 29) rather than truncating to the 29th (index 28).
 func quantiles(durations []time.Duration) (p50, p95, p99 time.Duration) {
 	if len(durations) == 0 {
 		return 0, 0, 0
 	}
 	q := func(frac float64) time.Duration {
-		return durations[int(float64(len(durations)-1)*frac)]
+		return durations[int(math.Ceil(float64(len(durations)-1)*frac))]
 	}
 	return q(0.50), q(0.95), q(0.99)
 }
