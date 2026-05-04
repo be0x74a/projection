@@ -25,34 +25,34 @@ builds:
 
 dockers:
   - image_templates:
-      - "ghcr.io/be0x74a/projection:{{ .Version }}-amd64"
+      - "ghcr.io/projection-operator/projection:{{ .Version }}-amd64"
     use: buildx
     dockerfile: Dockerfile.release
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.source=https://github.com/be0x74a/projection"
+      - "--label=org.opencontainers.image.source=https://github.com/projection-operator/projection"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.licenses=Apache-2.0"
   - image_templates:
-      - "ghcr.io/be0x74a/projection:{{ .Version }}-arm64"
+      - "ghcr.io/projection-operator/projection:{{ .Version }}-arm64"
     use: buildx
     goarch: arm64
     dockerfile: Dockerfile.release
     build_flag_templates:
       - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.source=https://github.com/be0x74a/projection"
+      - "--label=org.opencontainers.image.source=https://github.com/projection-operator/projection"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.licenses=Apache-2.0"
 
 docker_manifests:
-  - name_template: "ghcr.io/be0x74a/projection:{{ .Version }}"
+  - name_template: "ghcr.io/projection-operator/projection:{{ .Version }}"
     image_templates:
-      - "ghcr.io/be0x74a/projection:{{ .Version }}-amd64"
-      - "ghcr.io/be0x74a/projection:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/be0x74a/projection:latest"
+      - "ghcr.io/projection-operator/projection:{{ .Version }}-amd64"
+      - "ghcr.io/projection-operator/projection:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/projection-operator/projection:latest"
     image_templates:
-      - "ghcr.io/be0x74a/projection:{{ .Version }}-amd64"
-      - "ghcr.io/be0x74a/projection:{{ .Version }}-arm64"
+      - "ghcr.io/projection-operator/projection:{{ .Version }}-amd64"
+      - "ghcr.io/projection-operator/projection:{{ .Version }}-arm64"
 
 archives:
   - format: tar.gz
@@ -115,16 +115,16 @@ release:
   header: |
     ## projection {{ .Tag }}
 
-    See [CHANGELOG.md](https://github.com/be0x74a/projection/blob/main/CHANGELOG.md) for the human-curated change log.
+    See [CHANGELOG.md](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) for the human-curated change log.
   # `.Version` strips the leading "v" from the tag, matching what
   # image_templates publish (`ghcr.io/.../projection:0.1.0-alpha`).
   footer: |
-    **Container image:** `ghcr.io/be0x74a/projection:{{ .Version }}`
-    **Helm chart:** `oci://ghcr.io/be0x74a/charts/projection` version `{{ .Version }}`
+    **Container image:** `ghcr.io/projection-operator/projection:{{ .Version }}`
+    **Helm chart:** `oci://ghcr.io/projection-operator/charts/projection` version `{{ .Version }}`
 
     Verify the image signature:
     ```
-    cosign verify ghcr.io/be0x74a/projection:{{ .Version }} \
-      --certificate-identity-regexp '^https://github.com/be0x74a/projection/.github/workflows/' \
+    cosign verify ghcr.io/projection-operator/projection:{{ .Version }} \
+      --certificate-identity-regexp '^https://github.com/projection-operator/projection/.github/workflows/' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     ```

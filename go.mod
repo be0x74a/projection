@@ -1,4 +1,4 @@
-module github.com/be0x74a/projection
+module github.com/projection-operator/projection
 
 go 1.26.0
 

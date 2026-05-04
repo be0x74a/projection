@@ -53,7 +53,7 @@ update-crd-golden: manifests
 
 .PHONY: sync-chart-crds
 sync-chart-crds: manifests ## Copy generated CRDs into the Helm chart's crds/ directory.
-	cp config/crd/bases/projection.be0x74a.io_projections.yaml charts/projection/crds/projections.projection.be0x74a.io.yaml
+	cp config/crd/bases/projection.sh_projections.yaml charts/projection/crds/projections.projection.sh.yaml
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -75,10 +75,6 @@ test: manifests generate fmt vet envtest ## Run tests.
 .PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
 test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
-
-.PHONY: test-e2e-upgrade  # Run the upgrade-path e2e tests. Expects an empty Kind cluster (no pre-installed operator).
-test-e2e-upgrade:
-	go test ./test/e2e-upgrade/ -v -ginkgo.v -timeout=10m
 
 PROFILE ?= small
 KUBECONFIG_BENCH ?= $(HOME)/.kube/bench.config

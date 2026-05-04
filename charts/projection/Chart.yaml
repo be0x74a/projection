@@ -5,9 +5,9 @@ type: application
 version: 0.2.0
 appVersion: "0.2.0"
 kubeVersion: ">=1.32.0-0"
-home: https://github.com/be0x74a/projection
+home: https://github.com/projection-operator/projection
 sources:
-  - https://github.com/be0x74a/projection
+  - https://github.com/projection-operator/projection
 maintainers:
   - name: be0x74a
     url: https://github.com/be0x74a
@@ -18,7 +18,7 @@ keywords:
   - configmap
   - secret
   - reflector
-icon: https://raw.githubusercontent.com/be0x74a/projection/main/docs/assets/logo.svg
+icon: https://raw.githubusercontent.com/projection-operator/projection/main/docs/assets/logo.svg
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/category: integration-delivery

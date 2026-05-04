@@ -80,7 +80,7 @@ The controller emits Events on every state transition. They are the best way to 
 | `NamespaceResolutionFailed` | Warning | `Resolve` | `destination.namespaceSelector` failed to resolve to a namespace list.           |
 | `SourceFetchFailed`       | Warning | `Get`      | Dynamic client `Get` on the source returned an error.                             |
 | `SourceResolutionFailed`  | Warning | `Resolve`  | RESTMapper couldn't resolve `apiVersion`/`kind`.                                  |
-| `SourceOptedOut` / `SourceNotProjectable` | Warning | `Validate` | Source is missing the `projection.be0x74a.io/projectable=true` annotation (allowlist mode) or explicitly sets it to `false`. |
+| `SourceOptedOut` / `SourceNotProjectable` | Warning | `Validate` | Source is missing the `projection.sh/projectable=true` annotation (allowlist mode) or explicitly sets it to `false`. |
 | `InvalidSpec`             | Warning | `Validate` | `destination.namespace` and `destination.namespaceSelector` both set.             |
 
 ### Querying
@@ -207,7 +207,7 @@ Must be strictly greater than zero — the controller refuses to start with `--s
 
 ## One-shot snapshot
 
-The repo ships [`hack/observe.sh`](https://github.com/be0x74a/projection/blob/main/hack/observe.sh) as a copy-paste debugging helper. It dumps:
+The repo ships [`hack/observe.sh`](https://github.com/projection-operator/projection/blob/main/hack/observe.sh) as a copy-paste debugging helper. It dumps:
 
 - Cluster info and nodes.
 - Operator pod and the last 80 lines of controller logs.

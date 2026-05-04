@@ -84,8 +84,8 @@ There is only one cause: someone deleted the source.
 
 Two distinct reasons that share a policy gate. The source object exists and is resolvable, but it failed the opt-in / opt-out check:
 
-- **`SourceOptedOut`** — the source has `projection.be0x74a.io/projectable="false"`. This is the source owner's explicit veto; it takes precedence regardless of operator mode.
-- **`SourceNotProjectable`** — the operator is running in the default `allowlist` mode and the source is missing `projection.be0x74a.io/projectable="true"` (or has some other value). In `permissive` mode this reason is never emitted.
+- **`SourceOptedOut`** — the source has `projection.sh/projectable="false"`. This is the source owner's explicit veto; it takes precedence regardless of operator mode.
+- **`SourceNotProjectable`** — the operator is running in the default `allowlist` mode and the source is missing `projection.sh/projectable="true"` (or has some other value). In `permissive` mode this reason is never emitted.
 
 The mode is a cluster-wide operator flag (`--source-mode=allowlist|permissive`), not a per-`Projection` setting. It exists so platform teams can choose between "nothing is projected unless sources explicitly opt in" (allowlist, safe default) and "everything is projectable unless explicitly opted out" (permissive, convenience).
 
@@ -94,7 +94,7 @@ When either reason fires, the controller cleans up any destination it previously
 **Fix:**
 
 - **`SourceOptedOut`:** if you own the source and changed your mind, remove or set the annotation to `"true"`. Otherwise, delete the `Projection` — you cannot override the source owner's veto.
-- **`SourceNotProjectable`:** add `projection.be0x74a.io/projectable="true"` to the source's annotations. Or, if the whole cluster should default to permissive, switch the operator flag — but that is a cluster-wide policy decision, not a per-`Projection` workaround.
+- **`SourceNotProjectable`:** add `projection.sh/projectable="true"` to the source's annotations. Or, if the whole cluster should default to permissive, switch the operator flag — but that is a cluster-wide policy decision, not a per-`Projection` workaround.
 
 ## `DestinationWritten` failures
 
@@ -163,7 +163,7 @@ For selector-based `Projection`s this can fire in some namespaces and not others
 
 ### DestinationConflict
 
-The most important entry in this guide. The controller fetched an existing object at the destination coordinates and found that it is **not owned by this `Projection`**. Ownership is established by the annotation `projection.be0x74a.io/owned-by: <projection-namespace>/<projection-name>`, which the controller stamps on every destination it creates. If that annotation is missing or points at a different `Projection`, the controller refuses to update — the object belongs to something or someone else.
+The most important entry in this guide. The controller fetched an existing object at the destination coordinates and found that it is **not owned by this `Projection`**. Ownership is established by the annotation `projection.sh/owned-by: <projection-namespace>/<projection-name>`, which the controller stamps on every destination it creates. If that annotation is missing or points at a different `Projection`, the controller refuses to update — the object belongs to something or someone else.
 
 This is the invariant that makes `projection` safe to adopt alongside other tooling: we will never silently overwrite an object we didn't create. Conflict-safety is a design property, not a bug.
 
@@ -198,7 +198,7 @@ Typical causes:
 The destination already exists and is owned by this `Projection`, but the `Update` call was rejected. Same failure surface as [`DestinationCreateFailed`](#destinationcreatefailed) but on the overwrite path, with two additional wrinkles specific to updates:
 
 - **Conflict (409).** Another client modified the destination between our `Get` and our `Update`. The controller re-queues and the next reconcile reads the fresh resourceVersion. Self-clearing; if it persists, some other tool is writing to the destination in a tight loop.
-- **Immutable field change.** The controller strips server-assigned fields (`clusterIP`, `volumeName`, `nodeName`) before building the destination and restores them from the existing object before Update, specifically to avoid this. If you see "field is immutable" in the error, it is a bug — the set of preserved fields (`droppedSpecFieldsByGVK` in the controller source) is likely missing an entry. Please [open an issue](https://github.com/be0x74a/projection/issues/new) with the Kind and the field name.
+- **Immutable field change.** The controller strips server-assigned fields (`clusterIP`, `volumeName`, `nodeName`) before building the destination and restores them from the existing object before Update, specifically to avoid this. If you see "field is immutable" in the error, it is a bug — the set of preserved fields (`droppedSpecFieldsByGVK` in the controller source) is likely missing an entry. Please [open an issue](https://github.com/projection-operator/projection/issues/new) with the Kind and the field name.
 
 **Fix:** for webhook/RBAC errors, same remedies as [`DestinationCreateFailed`](#destinationcreatefailed). For 409 conflicts, wait one reconcile. For immutable-field errors, file a bug.
 

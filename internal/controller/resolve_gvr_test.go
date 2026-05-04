@@ -17,7 +17,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	projectionv1 "github.com/be0x74a/projection/api/v1"
+	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
 // TestResolveGVRRejectsClusterScoped is a focused unit test — builds a

@@ -15,7 +15,7 @@ Prerequisites:
 Clone and build:
 
 ```bash
-git clone https://github.com/be0x74a/projection.git
+git clone https://github.com/projection-operator/projection.git
 cd projection
 make build
 ```
@@ -109,13 +109,13 @@ Some Kinds carry apiserver-allocated spec fields that must be stripped before mi
 5. **Add a fuzz seed** in `internal/controller/fuzz_test.go`'s `FuzzPreserveAPIServerAllocatedFields`.
 6. **Document** — add a row to the limitations.md table and a `### Added` bullet to `CHANGELOG.md` under `[Unreleased]`.
 
-The umbrella issue tracking this work is [#32](https://github.com/be0x74a/projection/issues/32).
+The umbrella issue tracking this work is [#32](https://github.com/projection-operator/projection/issues/32).
 
 ## Code of Conduct
 
 This project follows the [Contributor Covenant](./CODE_OF_CONDUCT.md).
 By participating, you agree to uphold it. Report issues privately via a
-[GitHub Security Advisory](https://github.com/be0x74a/projection/security/advisories/new).
+[GitHub Security Advisory](https://github.com/projection-operator/projection/security/advisories/new).
 
 ## License
 

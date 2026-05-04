@@ -1,10 +1,10 @@
 # API Reference
 
 ## Packages
-- [projection.be0x74a.io/v1](#projectionbe0x74aiov1)
+- [projection.sh/v1](#projectionshv1)
 
 
-## projection.be0x74a.io/v1
+## projection.sh/v1
 
 Package v1 contains API Schema definitions for the projection v1 API group
 
@@ -50,7 +50,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `labels` _object (keys:string, values:string)_ | Labels are merged with the source object's metadata.labels before<br />writing to the destination. Keys set here win on conflict with<br />source labels. |  | Optional: \{\} <br /> |
-| `annotations` _object (keys:string, values:string)_ | Annotations are merged with the source object's metadata.annotations<br />before writing to the destination. Keys set here win on conflict<br />with source annotations. Note: the controller always overwrites<br />projection.be0x74a.io/owned-by to its own bookkeeping value;<br />attempts to set it here are ignored. |  | Optional: \{\} <br /> |
+| `annotations` _object (keys:string, values:string)_ | Annotations are merged with the source object's metadata.annotations<br />before writing to the destination. Keys set here win on conflict<br />with source annotations. Note: the controller always overwrites<br />projection.sh/owned-by to its own bookkeeping value;<br />attempts to set it here are ignored. |  | Optional: \{\} <br /> |
 
 
 #### Projection
@@ -60,7 +60,7 @@ _Appears in:_
 Projection mirrors one Kubernetes object from a source location to one or
 more destination namespaces, declaratively and conflict-safely. Source
 edits propagate to destinations in ~100 ms via dynamic watches. Destinations
-carry a projection.be0x74a.io/owned-by annotation the controller uses to
+carry a projection.sh/owned-by annotation the controller uses to
 refuse overwriting resources it did not create.
 
 
@@ -70,7 +70,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `projection.be0x74a.io/v1` | | |
+| `apiVersion` _string_ | `projection.sh/v1` | | |
 | `kind` _string_ | `Projection` | | |
 | `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  | Optional: \{\} <br /> |
 | `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  | Optional: \{\} <br /> |
@@ -91,7 +91,7 @@ ProjectionList contains a list of Projection.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `projection.be0x74a.io/v1` | | |
+| `apiVersion` _string_ | `projection.sh/v1` | | |
 | `kind` _string_ | `ProjectionList` | | |
 | `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  | Optional: \{\} <br /> |
 | `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  | Optional: \{\} <br /> |

@@ -1,8 +1,8 @@
 # CRD behavior and examples
 
-This page covers cross-field invariants, controller-side condition reasons, the finalizer/annotation the operator manages, and fully worked YAML examples for `projection.be0x74a.io/v1` `Projection`. For the field-by-field API schema — types, validation rules, defaults — see the auto-generated [API reference](api-reference.md), which is regenerated from `api/v1/projection_types.go` by `make docs-ref` and verified in CI.
+This page covers cross-field invariants, controller-side condition reasons, the finalizer/annotation the operator manages, and fully worked YAML examples for `projection.sh/v1` `Projection`. For the field-by-field API schema — types, validation rules, defaults — see the auto-generated [API reference](api-reference.md), which is regenerated from `api/v1/projection_types.go` by `make docs-ref` and verified in CI.
 
-- **API group**: `projection.be0x74a.io`
+- **API group**: `projection.sh`
 - **API version**: `v1` (storage version; stability commitments documented in [API stability](api-stability.md))
 - **Kind**: `Projection`
 - **Scope**: Namespaced
@@ -61,7 +61,7 @@ Note: the destination `Kind` is always the same as the source `Kind` — there i
 
 ## Overlay invariants
 
-The controller always stamps `projection.be0x74a.io/owned-by: <projection-ns>/<projection-name>` on the destination, regardless of overlay. Do not attempt to set this key via overlay — it will be overwritten by the controller on every reconcile.
+The controller always stamps `projection.sh/owned-by: <projection-ns>/<projection-name>` on the destination, regardless of overlay. Do not attempt to set this key via overlay — it will be overwritten by the controller on every reconcile.
 
 ## `status.conditions`
 
@@ -100,10 +100,10 @@ The CRD also exposes the short name `proj`, so `kubectl get proj` works as a sho
 
 | Name                                      | Where                  | Purpose                                                                                          |
 | ----------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------ |
-| `projection.be0x74a.io/finalizer`         | `Projection.metadata`  | Blocks deletion until the controller has cleaned up the destination object (if it still owns it). |
-| `projection.be0x74a.io/owned-by`          | Destination annotations | Marks the destination as owned by `<projection-ns>/<projection-name>`. Used for conflict detection on every reconcile and before destination cleanup. |
-| `projection.be0x74a.io/owned-by-uid`      | Destination labels      | The owning Projection's `metadata.uid`. Lets cleanup paths find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking namespaces. The annotation above is still verified after the label-driven list as a belt-and-braces guard. |
-| `projection.be0x74a.io/projectable`       | Source annotations *(read by controller, written by source owners)* | Source-side opt-in/veto. `"true"` = opt-in (required under default `sourceMode=allowlist`). `"false"` = veto (always honored regardless of mode; flipping a previously-projected source to `"false"` garbage-collects the destination). Any other value is treated as "not opted in" under allowlist, "projectable by default" under permissive. |
+| `projection.sh/finalizer`         | `Projection.metadata`  | Blocks deletion until the controller has cleaned up the destination object (if it still owns it). |
+| `projection.sh/owned-by`          | Destination annotations | Marks the destination as owned by `<projection-ns>/<projection-name>`. Used for conflict detection on every reconcile and before destination cleanup. |
+| `projection.sh/owned-by-uid`      | Destination labels      | The owning Projection's `metadata.uid`. Lets cleanup paths find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking namespaces. The annotation above is still verified after the label-driven list as a belt-and-braces guard. |
+| `projection.sh/projectable`       | Source annotations *(read by controller, written by source owners)* | Source-side opt-in/veto. `"true"` = opt-in (required under default `sourceMode=allowlist`). `"false"` = veto (always honored regardless of mode; flipping a previously-projected source to `"false"` garbage-collects the destination). Any other value is treated as "not opted in" under allowlist, "projectable by default" under permissive. |
 
 ## Stripped fields by Kind
 
@@ -118,12 +118,12 @@ Some Kinds carry apiserver-allocated spec fields the controller strips before wr
 
 On update, the controller copies these fields from the existing destination back onto the desired object before issuing the `Update`, so an `Update` of a `Service` whose `clusterIP` we stripped at build time isn't rejected for trying to clear an immutable field.
 
-If you hit `field is immutable` errors for a Kind not in the table above, the controller is likely missing an entry in `droppedSpecFieldsByGVK` — see [CONTRIBUTING.md](https://github.com/be0x74a/projection/blob/main/CONTRIBUTING.md#adding-a-kind-to-droppedspecfieldsbygvk) for the path to add one, and please [open an issue](https://github.com/be0x74a/projection/issues/new).
+If you hit `field is immutable` errors for a Kind not in the table above, the controller is likely missing an entry in `droppedSpecFieldsByGVK` — see [CONTRIBUTING.md](https://github.com/projection-operator/projection/blob/main/CONTRIBUTING.md#adding-a-kind-to-droppedspecfieldsbygvk) for the path to add one, and please [open an issue](https://github.com/projection-operator/projection/issues/new).
 
 ## Fully-spelled-out example
 
 ```yaml
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: app-config-to-tenant-a
@@ -165,7 +165,7 @@ status:
 ## Fan-out example (one source → many destinations)
 
 ```yaml
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: shared-config-fanout
@@ -180,10 +180,10 @@ spec:
     # namespace is omitted — namespaceSelector picks the destinations
     namespaceSelector:
       matchLabels:
-        projection.be0x74a.io/mirror: "true"
+        projection.sh/mirror: "true"
   overlay:
     labels:
       projected-by: projection
 ```
 
-Every namespace carrying the label `projection.be0x74a.io/mirror=true` gets a copy. Adding or removing the label on a namespace triggers a reconcile (via the controller's namespace watch) and the destination set adjusts automatically.
+Every namespace carrying the label `projection.sh/mirror=true` gets a copy. Adding or removing the label on a namespace triggers a reconcile (via the controller's namespace watch) and the destination set adjusts automatically.

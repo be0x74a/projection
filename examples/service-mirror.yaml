@@ -23,7 +23,7 @@ metadata:
   namespace: default
   annotations:
     # Opt-in required by the default allowlist source-mode.
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 spec:
   type: ClusterIP
   selector:
@@ -33,7 +33,7 @@ spec:
       targetPort: 8080
       name: http
 ---
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: api-into-team-b

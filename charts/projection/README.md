@@ -1,6 +1,6 @@
 # projection
 
-A Helm chart for the [projection](https://github.com/be0x74a/projection)
+A Helm chart for the [projection](https://github.com/projection-operator/projection)
 Kubernetes operator. Projection is a CRD for declarative mirroring of Kubernetes
 resources across namespaces.
 
@@ -55,7 +55,7 @@ Note: Helm will NOT update CRDs on upgrade. If the CRD schema has changed
 between chart versions you must apply the new CRD manually:
 
 ```shell
-kubectl apply -f charts/projection/crds/projections.projection.be0x74a.io.yaml
+kubectl apply -f charts/projection/crds/projections.projection.sh.yaml
 ```
 
 ## Uninstall
@@ -68,7 +68,7 @@ The CRD is intentionally left behind to protect any existing `Projection`
 custom resources. To remove it:
 
 ```shell
-kubectl delete crd projections.projection.be0x74a.io
+kubectl delete crd projections.projection.sh
 ```
 
 ## CRD lifecycle
@@ -82,7 +82,7 @@ multiple releases.
 
 | Key                                 | Default                       | Description                                                                 |
 | ----------------------------------- | ----------------------------- | --------------------------------------------------------------------------- |
-| `image.repository`                  | `ghcr.io/be0x74a/projection`  | Controller image repository.                                                |
+| `image.repository`                  | `ghcr.io/projection-operator/projection`  | Controller image repository.                                                |
 | `image.tag`                         | `""` (falls back to AppVersion) | Controller image tag.                                                     |
 | `image.pullPolicy`                  | `IfNotPresent`                | Controller image pull policy.                                               |
 | `imagePullSecrets`                  | `[]`                          | imagePullSecrets referenced by the pod.                                    |
@@ -121,7 +121,7 @@ multiple releases.
 | `requeueInterval`                   | `30s`                         | Requeue cadence for reconciliation. See observability.md for tuning guidance. |
 | `leaderElection.leaseDuration`      | `15s`                         | Leader-election lease duration. Only effective when `leaderElection.enabled=true`. |
 | `selectorWriteConcurrency`          | `16`                          | Per-Projection in-flight destination-write cap during selector fan-out. Must be > 0. Raise for selectors matching thousands of namespaces; lower on apiserver-constrained clusters. See [docs/observability.md](../../docs/observability.md) for the rationale. |
-| `sourceMode`                        | `allowlist`                   | Source projectability policy. `allowlist` requires source objects to carry `projection.be0x74a.io/projectable="true"`; `permissive` allows any source unless explicitly opted out. See [docs/concepts.md](../../docs/concepts.md). |
+| `sourceMode`                        | `allowlist`                   | Source projectability policy. `allowlist` requires source objects to carry `projection.sh/projectable="true"`; `permissive` allows any source unless explicitly opted out. See [docs/concepts.md](../../docs/concepts.md). |
 | `supportedKinds`                    | `[{apiGroup: "*", resources: ["*"]}]` | RBAC scope for the controller's ClusterRole. Default preserves pre-v0.2 cluster-admin-equivalent access. Replace with an explicit list to narrow; `[]` grants nothing beyond Projection CRs. See [docs/security.md](../../docs/security.md). |
 
 ## Values validation
@@ -131,7 +131,7 @@ The chart ships a `values.schema.json` that Helm consults during `install`, `upg
 Editors with JSON-schema support also pick this up. For VS Code with `redhat.vscode-yaml`, the schema can be associated explicitly via a [modeline](https://github.com/redhat-developer/vscode-yaml#using-inlined-schema) at the top of your overrides file:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/be0x74a/projection/main/charts/projection/values.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/projection-operator/projection/main/charts/projection/values.schema.json
 ```
 
 Schema strictness is pragmatic: top-level and chart-defined nested keys are locked down (`additionalProperties: false`) so typos surface early; pass-through Kubernetes shapes (`nodeSelector`, `tolerations`, `affinity`, `securityContext.{pod,container}` contents, `networkPolicy.extraEgress[]`, `serviceMonitor.tlsConfig`) stay opaque — the API server validates those authoritatively.
@@ -147,11 +147,11 @@ metadata:
   annotations:
     # Required when the controller runs with the default sourceMode=allowlist.
     # Skip this annotation if you set sourceMode=permissive.
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   greeting: hello
 ---
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: mirror-greeting

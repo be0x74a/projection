@@ -4,7 +4,7 @@
 #   kubectl get projections
 #   kubectl get configmap -A -l projected-by=projection
 #
-# Label a new namespace with projection.be0x74a.io/mirror=true and the
+# Label a new namespace with projection.sh/mirror=true and the
 # destination appears there too; remove the label and it's cleaned up.
 # This is the recommended pattern for "one source, many destinations" —
 # one Projection covers every matching namespace, with a DestinationWritten
@@ -15,21 +15,21 @@ kind: Namespace
 metadata:
   name: tenant-a
   labels:
-    projection.be0x74a.io/mirror: "true"
+    projection.sh/mirror: "true"
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: tenant-b
   labels:
-    projection.be0x74a.io/mirror: "true"
+    projection.sh/mirror: "true"
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: tenant-c
   labels:
-    projection.be0x74a.io/mirror: "true"
+    projection.sh/mirror: "true"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -40,12 +40,12 @@ metadata:
     # Source owner opts this ConfigMap in to projection. Required under the
     # default allowlist source-mode; harmless in permissive mode. Setting
     # this to "false" is always honored as an opt-out veto.
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   log_level: info
   feature_flag: enabled
 ---
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: app-config-fanout
@@ -59,7 +59,7 @@ spec:
   destination:
     namespaceSelector:
       matchLabels:
-        projection.be0x74a.io/mirror: "true"
+        projection.sh/mirror: "true"
     # name omitted → defaults to source.name ("app-config") in every
     # matching namespace.
   overlay:

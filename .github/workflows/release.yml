@@ -79,12 +79,12 @@ jobs:
       # can scan it locally instead of trying to authenticate against the
       # private ghcr.io registry on its own.
       - name: Pull image for SBOM
-        run: docker pull ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+        run: docker pull ghcr.io/projection-operator/projection:${{ steps.tag.outputs.version }}
 
       - name: Generate SBOM for image
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+          image: ghcr.io/projection-operator/projection:${{ steps.tag.outputs.version }}
           format: spdx-json
           output-file: image.sbom.spdx.json
           upload-artifact: false
@@ -93,21 +93,21 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign sign --yes ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+          cosign sign --yes ghcr.io/projection-operator/projection:${{ steps.tag.outputs.version }}
 
       - name: Attach SBOM to image
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign attach sbom --sbom image.sbom.spdx.json ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
-          cosign sign --yes --attachment sbom ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+          cosign attach sbom --sbom image.sbom.spdx.json ghcr.io/projection-operator/projection:${{ steps.tag.outputs.version }}
+          cosign sign --yes --attachment sbom ghcr.io/projection-operator/projection:${{ steps.tag.outputs.version }}
 
       # Now that goreleaser is done with dist/, build the install.yaml bundle
       # and attach it to the GitHub Release. `make build-installer` mutates
       # config/manager/kustomization.yaml, but the workspace is only used for
       # this final step so the dirty state is harmless.
       - name: Build installer bundle
-        run: make build-installer IMG=ghcr.io/be0x74a/projection:${{ steps.tag.outputs.version }}
+        run: make build-installer IMG=ghcr.io/projection-operator/projection:${{ steps.tag.outputs.version }}
 
       - name: Upload install.yaml to GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0

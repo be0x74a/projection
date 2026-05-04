@@ -44,7 +44,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	projectionv1 "github.com/be0x74a/projection/api/v1"
+	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
 // envtest does not run the namespace GC controller, so namespaces deleted in
@@ -1701,7 +1701,7 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 				Name:      dottedName,
 				Namespace: sourceNS,
 				Annotations: map[string]string{
-					"projection.be0x74a.io/projectable": "true",
+					"projection.sh/projectable": "true",
 				},
 			},
 			Data: map[string]string{"foo": "bar"},
@@ -1740,7 +1740,7 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		var got corev1.ConfigMap
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: destNS, Name: dottedName}, &got)).To(Succeed())
 		Expect(got.GetAnnotations()).To(HaveKeyWithValue(
-			"projection.be0x74a.io/owned-by",
+			"projection.sh/owned-by",
 			projKey.Namespace+"/"+projKey.Name,
 		))
 	})

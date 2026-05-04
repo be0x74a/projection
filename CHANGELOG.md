@@ -9,10 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-05-04
 
+### Project rebrand
+
+This release re-publishes v0.2.0 under the project's neutral identity (zero adopters at the original 22-minute v0.2.0 release, so no migration burden):
+
+- **API group:** `projection.be0x74a.io/v1` → `projection.sh/v1`. Annotation keys (`owned-by`, `projectable`, finalizer) and the `owned-by-uid` label move to the new prefix.
+- **Repo:** `github.com/be0x74a/projection` → `github.com/projection-operator/projection`. Old URL redirects for ~90 days.
+- **OCI artifacts:** `ghcr.io/be0x74a/projection` → `ghcr.io/projection-operator/projection`; chart at `ghcr.io/projection-operator/charts/projection`.
+- **Docs site:** `projection.be0x74a.io` → `projection.sh`. Old domain serves a redirect.
+- **Removed:** `hack/migrate-to-v1.sh`, `docs/upgrade.md`, and `test/e2e-upgrade/` — defensive infrastructure for adopters that don't exist. Operators upgrading from any pre-1.0 deployment should perform a clean reinstall under the new identity.
+
 ### ⚠ BREAKING CHANGES
 
 - The default **source-mode** is now `allowlist`. Source objects must carry
-  the annotation `projection.be0x74a.io/projectable: "true"` to be
+  the annotation `projection.sh/projectable: "true"` to be
   mirrored. Clusters that prefer the previous blanket-permissive behavior
   can opt in with the controller flag `--source-mode=permissive`
   (Helm value: `sourceMode: permissive`). The annotation value `"false"`
@@ -23,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Controller flag `--source-mode=permissive|allowlist` (default
   `allowlist`). Plumbed through the Helm chart as `sourceMode`.
-- Source-side annotation `projection.be0x74a.io/projectable` with values
+- Source-side annotation `projection.sh/projectable` with values
   `"true"` (opt-in) and `"false"` (opt-out veto).
 - New `SourceResolved=False` reasons: `SourceOptedOut` (source annotated
   `"false"`) and `SourceNotProjectable` (source lacks `"true"` annotation

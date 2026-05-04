@@ -2,7 +2,7 @@
 
 First numbers for `projection` at three operating points on Kind, using the
 benchmark harness shipped in
-[`test/bench/`](https://github.com/be0x74a/projection/tree/main/test/bench)
+[`test/bench/`](https://github.com/projection-operator/projection/tree/main/test/bench)
 (see `make bench`). The goals are **scaling behavior** (does the controller
 stay flat under more Projections?) and **user-visible latency** (how fast does
 an edit on a source object reach the destination?), not absolute throughput
@@ -22,7 +22,7 @@ on production hardware.
 | Harness → controller | harness scrapes `http://127.0.0.1:8080/metrics`; source-to-destination latency measured by stamping a unix-nano annotation on the source and polling destinations |
 
 All numbers below come from a `main` controller at `v0.1.0-alpha.1` (the first published tag). They will be re-measured at v0.2.0 on a `kindest/node:v1.32.x` cluster; the scaling shape is expected to hold but absolute numbers may shift slightly.
-The harness spins up its own bench CRDs (`bench.projection.be0x74a.io/v1
+The harness spins up its own bench CRDs (`bench.projection.sh/v1
 BenchObject{N}`), source objects, destination namespaces, and Projections,
 then tears them all down after the measurement window. Each profile runs a
 30-second settle before measuring to let the initial-reconcile backlog drain.
@@ -219,17 +219,17 @@ make bench PROFILE=selector KUBECONFIG_BENCH=/tmp/bench.kubeconfig
 kind delete cluster --name bench
 ```
 
-See [`test/bench/`](https://github.com/be0x74a/projection/tree/main/test/bench)
+See [`test/bench/`](https://github.com/projection-operator/projection/tree/main/test/bench)
 for the harness source. Profile shapes and thresholds are in
 `test/bench/profile.go`.
 
 ## Known limitations in the harness
 
 - **CRD teardown is noisy in controller logs.** When the bench tears down
-  its `bench.projection.be0x74a.io/v1` CRDs, the controller's dynamic
+  its `bench.projection.sh/v1` CRDs, the controller's dynamic
   watches on those GVKs fail with `NoKindMatchError` and retry indefinitely.
   This is cosmetic (the watches aren't doing anything useful post-teardown)
-  and documented in [#28](https://github.com/be0x74a/projection/issues/28).
+  and documented in [#28](https://github.com/projection-operator/projection/issues/28).
   Restart the controller between bench runs to clear the log.
 - **Reconcile histogram p99 can be quantized.** The controller-runtime
   reconcile-duration histogram uses Prometheus' default buckets, so at low

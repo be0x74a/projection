@@ -4,17 +4,17 @@
 
 ## The commitment
 
-`projection.be0x74a.io/v1` is **permanent**. Once v1.0.0 is tagged:
+`projection.sh/v1` is **permanent**. Once v1.0.0 is tagged:
 
 - No field in the CRD schema will be renamed, removed, or have its semantics changed.
 - Existing condition types, condition reasons, event reasons, and metric names will not be renamed or repurposed.
-- Annotation and label keys under `projection.be0x74a.io/*` will not be renamed or have their value semantics changed.
+- Annotation and label keys under `projection.sh/*` will not be renamed or have their value semantics changed.
 
-Breaking changes to the API land as `projection.be0x74a.io/v2`, served alongside v1 via a conversion webhook.
+Breaking changes to the API land as `projection.sh/v2`, served alongside v1 via a conversion webhook.
 
 ## What is covered
 
-### CRD schema (`projection.be0x74a.io/v1`)
+### CRD schema (`projection.sh/v1`)
 
 The fields of `Projection.spec` and `Projection.status` listed in [`crd-reference.md`](crd-reference.md) are permanent. New optional fields may be added; existing fields are not removed or renamed.
 
@@ -22,12 +22,12 @@ The fields of `Projection.spec` and `Projection.status` listed in [`crd-referenc
 
 | Key                                             | Writer     | Meaning                                                                                      |
 | ----------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------- |
-| `projection.be0x74a.io/owned-by`                | controller | Destination bookkeeping: `<projection-namespace>/<projection-name>`. The controller refuses to overwrite objects lacking this annotation. |
-| `projection.be0x74a.io/owned-by-uid` (label)    | controller | Destination bookkeeping: the value is the owning Projection's `metadata.uid` (RFC-4122 UUID, 36 chars). Enables cluster-wide owned-object listing via `List(LabelSelector)`. |
-| `projection.be0x74a.io/projectable`             | source owner | Opt-in / opt-out policy gate. **Strictly binary:** `"true"` = opt-in, `"false"` = veto, any other value (including missing or empty string) = "not opted in" under `allowlist` mode / "projectable by default" under `permissive` mode. Source-owner vetoes (`"false"`) are always honored regardless of mode. |
-| `projection.be0x74a.io/finalizer`               | controller | Finalizer on the Projection CR. Cleans up destinations on deletion. |
+| `projection.sh/owned-by`                | controller | Destination bookkeeping: `<projection-namespace>/<projection-name>`. The controller refuses to overwrite objects lacking this annotation. |
+| `projection.sh/owned-by-uid` (label)    | controller | Destination bookkeeping: the value is the owning Projection's `metadata.uid` (RFC-4122 UUID, 36 chars). Enables cluster-wide owned-object listing via `List(LabelSelector)`. |
+| `projection.sh/projectable`             | source owner | Opt-in / opt-out policy gate. **Strictly binary:** `"true"` = opt-in, `"false"` = veto, any other value (including missing or empty string) = "not opted in" under `allowlist` mode / "projectable by default" under `permissive` mode. Source-owner vetoes (`"false"`) are always honored regardless of mode. |
+| `projection.sh/finalizer`               | controller | Finalizer on the Projection CR. Cleans up destinations on deletion. |
 
-Annotations and labels under `bench.projection.be0x74a.io/*` are **internal, diagnostic-only, not part of the v1 API**. Their presence, names, and value formats may change without notice.
+Annotations and labels under `bench.projection.sh/*` are **internal, diagnostic-only, not part of the v1 API**. Their presence, names, and value formats may change without notice.
 
 ### Status conditions
 
@@ -78,7 +78,7 @@ Free to change in any release, including patch releases:
 - Log format, log messages, and error message wording.
 - Internal Go package layout, controller internals, test helpers.
 - Generated code (DeepCopy, manifests).
-- The `bench.projection.be0x74a.io/*` annotation prefix.
+- The `bench.projection.sh/*` annotation prefix.
 
 ## Deprecation policy
 

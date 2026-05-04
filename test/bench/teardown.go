@@ -13,7 +13,7 @@ import (
 // stops reconciling), then sources, then namespaces, then CRDs. Best-effort:
 // logs failures but continues.
 func teardown(ctx context.Context, c *clients, res *bootstrapResult) {
-	projGVR := schema.GroupVersionResource{Group: "projection.be0x74a.io", Version: "v1", Resource: "projections"}
+	projGVR := schema.GroupVersionResource{Group: "projection.sh", Version: "v1", Resource: "projections"}
 	nsGVR := schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
 
 	// Delete Projections.
