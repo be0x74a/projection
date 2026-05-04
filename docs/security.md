@@ -214,7 +214,7 @@ This keeps the IAM/RBAC trust path inside the cluster's own identity primitives 
 Release images are pushed to `ghcr.io/be0x74a/projection` and **cosign-signed** with GitHub's OIDC keyless workflow. Verify before pulling:
 
 ```bash
-cosign verify ghcr.io/be0x74a/projection:v0.1.0-alpha.1 \
+cosign verify ghcr.io/be0x74a/projection:v0.2.0 \
   --certificate-identity-regexp "https://github.com/be0x74a/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -222,7 +222,7 @@ cosign verify ghcr.io/be0x74a/projection:v0.1.0-alpha.1 \
 The Helm chart is published to `oci://ghcr.io/be0x74a/charts/projection` and signed with the same workflow:
 
 ```bash
-cosign verify oci://ghcr.io/be0x74a/charts/projection:0.1.0-alpha.1 \
+cosign verify oci://ghcr.io/be0x74a/charts/projection:0.2.0 \
   --certificate-identity-regexp "https://github.com/be0x74a/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
