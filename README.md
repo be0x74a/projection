@@ -8,14 +8,14 @@
 
 <p align="center">
 
-[![CI](https://github.com/be0x74a/projection/actions/workflows/ci.yml/badge.svg)](https://github.com/be0x74a/projection/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/be0x74a/projection?include_prereleases&sort=semver)](https://github.com/be0x74a/projection/releases)
+[![CI](https://github.com/projection-operator/projection/actions/workflows/ci.yml/badge.svg)](https://github.com/projection-operator/projection/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/projection-operator/projection?include_prereleases&sort=semver)](https://github.com/projection-operator/projection/releases)
 [![API](https://img.shields.io/badge/API-v1-blue)](docs/api-stability.md)
-[![Go Report Card](https://goreportcard.com/badge/github.com/be0x74a/projection)](https://goreportcard.com/report/github.com/be0x74a/projection)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/be0x74a/projection/badge)](https://scorecard.dev/viewer/?uri=github.com/be0x74a/projection)
+[![Go Report Card](https://goreportcard.com/badge/github.com/projection-operator/projection)](https://goreportcard.com/report/github.com/projection-operator/projection)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/projection-operator/projection/badge)](https://scorecard.dev/viewer/?uri=github.com/projection-operator/projection)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12533/badge)](https://www.bestpractices.dev/projects/12533)
-[![License](https://img.shields.io/github/license/be0x74a/projection)](LICENSE)
-[![Go Reference](https://pkg.go.dev/badge/github.com/be0x74a/projection.svg)](https://pkg.go.dev/github.com/be0x74a/projection)
+[![License](https://img.shields.io/github/license/projection-operator/projection)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/projection-operator/projection.svg)](https://pkg.go.dev/github.com/projection-operator/projection)
 
 </p>
 
@@ -58,11 +58,11 @@ metadata:
   annotations:
     # Source opts in to projection (default source-mode is "allowlist").
     # Set to "false" to veto projection as the source owner.
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   log_level: info
 ---
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: app-config-into-tenants
@@ -85,7 +85,7 @@ $ kubectl get projections -A
 NAMESPACE   NAME                       KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION   READY   AGE
 platform    app-config-into-tenants    ConfigMap   platform           app-config    app-config    True    2s
 
-$ kubectl get configmap -n tenant-a app-config -o jsonpath='{.metadata.annotations.projection\.be0x74a\.io/owned-by}'
+$ kubectl get configmap -n tenant-a app-config -o jsonpath='{.metadata.annotations.projection\.sh/owned-by}'
 platform/app-config-into-tenants
 ```
 
@@ -98,7 +98,7 @@ Pre-existing object at the destination? `Ready=False reason=DestinationConflict`
 - **Any Kind** — `RESTMapper`-driven GVR resolution. Works on built-in resources, your CRDs, anything the apiserver knows about. Source `apiVersion` accepts both pinned forms (`apps/v1`) and the unpinned `apps/*` form, which follows the cluster's preferred served version.
 - **Watch-driven** — dynamic informer registration per source GVK. Edits propagate in ~100ms; no periodic polling.
 - **Selector-based fan-out** — one `Projection` can mirror its source into every namespace matching a `namespaceSelector`, with destinations added and removed as namespaces gain or lose the matching label. Bounded fan-out concurrency keeps the apiserver healthy at scale.
-- **Source-owner consent** — default `sourceMode=allowlist` requires sources to carry `projection.be0x74a.io/projectable="true"`. Source owners can also veto with `="false"` regardless of mode.
+- **Source-owner consent** — default `sourceMode=allowlist` requires sources to carry `projection.sh/projectable="true"`. Source owners can also veto with `="false"` regardless of mode.
 - **Conflict-safe** — ownership annotation marks our destinations. We refuse to overwrite objects we don't own and report `DestinationConflict` on status. Source deletion (404) automatically cleans up every owned destination.
 - **Clean deletion** — finalizer removes destinations on `Projection` deletion (sweeping all namespaces for selector-based fan-out). If ownership has been stripped, we leave the object alone.
 - **Observable** — three status conditions (`SourceResolved`, `DestinationWritten`, `Ready`), `events.k8s.io/v1` Events with `action` verbs (Create/Update/Delete/Get/Validate/Resolve/Write), and Prometheus metrics (`projection_reconcile_total{result}`, `projection_watched_gvks`).
@@ -112,7 +112,7 @@ Pre-existing object at the destination? `Ready=False reason=DestinationConflict`
 ### Helm
 
 ```bash
-helm install projection oci://ghcr.io/be0x74a/charts/projection \
+helm install projection oci://ghcr.io/projection-operator/charts/projection \
   --version 0.2.0 \
   --namespace projection-system --create-namespace
 ```
@@ -120,13 +120,13 @@ helm install projection oci://ghcr.io/be0x74a/charts/projection \
 ### `kubectl apply`
 
 ```bash
-kubectl apply -f https://github.com/be0x74a/projection/releases/download/v0.2.0/install.yaml
+kubectl apply -f https://github.com/projection-operator/projection/releases/download/v0.2.0/install.yaml
 ```
 
 Then create your first `Projection`:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/be0x74a/projection/main/examples/configmap-cross-namespace.yaml
+kubectl apply -f https://raw.githubusercontent.com/projection-operator/projection/main/examples/configmap-cross-namespace.yaml
 kubectl get projections -A
 ```
 
@@ -173,7 +173,7 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Be excellent to e
 
 ## Security
 
-Found a vulnerability? Please report it privately via [GitHub Security Advisories](https://github.com/be0x74a/projection/security/advisories/new). See [SECURITY.md](SECURITY.md).
+Found a vulnerability? Please report it privately via [GitHub Security Advisories](https://github.com/projection-operator/projection/security/advisories/new). See [SECURITY.md](SECURITY.md).
 
 ## License
 

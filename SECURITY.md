@@ -17,7 +17,7 @@ minor release line receives security fixes.
 Report security issues privately using GitHub's private security advisory
 feature:
 
-https://github.com/be0x74a/projection/security/advisories/new
+https://github.com/projection-operator/projection/security/advisories/new
 
 Include as much detail as you can — reproduction steps, affected versions,
 and the impact you observed. Proof-of-concept code is welcome but not

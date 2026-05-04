@@ -32,7 +32,7 @@ metadata:
 data:
   log_level: info
 ---
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: app-config-into-tenants
@@ -56,7 +56,7 @@ NAMESPACE   NAME                      KIND        SOURCE-NAMESPACE   SOURCE-NAME
 platform    app-config-into-tenants   ConfigMap   platform           app-config    app-config    True
 
 $ kubectl get configmap -n tenant-a app-config \
-    -o jsonpath='{.metadata.annotations.projection\.be0x74a\.io/owned-by}'
+    -o jsonpath='{.metadata.annotations.projection\.sh/owned-by}'
 platform/app-config-into-tenants
 ```
 
@@ -68,7 +68,7 @@ platform/app-config-into-tenants
 
 - **Any Kind** — `RESTMapper`-driven GVR resolution.
 - **Watch-driven** — dynamic informer registration per source GVK, not a periodic polling loop.
-- **Conflict-safe** — `projection.be0x74a.io/owned-by` annotation marks our destinations.
+- **Conflict-safe** — `projection.sh/owned-by` annotation marks our destinations.
 - **Clean deletion** — finalizer removes the destination on `Projection` deletion; leaves it alone if ownership has been stripped.
 - **Observable** — three status conditions (`SourceResolved`, `DestinationWritten`, `Ready`), Kubernetes Events for every state transition, and a `projection_reconcile_total{result}` counter.
 - **Validated at admission** — source fields are pattern-validated, so typos fail at `kubectl apply`, not at runtime.

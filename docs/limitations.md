@@ -1,14 +1,14 @@
 # Limitations & roadmap
 
-`projection` is pre-1.0. The CRD is at `projection.be0x74a.io/v1`, and the surface that will be frozen at v1.0.0 is documented in [API stability](api-stability.md). Pre-1.0 minor releases can carry breaking changes — v0.2 ships three (default `sourceMode` flip, Events moved to `events.k8s.io/v1`, the new `namespaceSelector` field) and the [upgrade guide](upgrade.md) walks through them. This page is the standing list of "things that don't work today" and the rough roadmap for closing the gaps.
+`projection` is pre-1.0. The CRD is at `projection.sh/v1`, and the surface that will be frozen at v1.0.0 is documented in [API stability](api-stability.md). Pre-1.0 minor releases can carry breaking changes — v0.2 ships three (default `sourceMode` flip, Events moved to `events.k8s.io/v1`, the new `namespaceSelector` field) and the [upgrade guide](upgrade.md) walks through them. This page is the standing list of "things that don't work today" and the rough roadmap for closing the gaps.
 
 ## Known limitations
 
 ### Selector fan-out applies the same overlay to every destination
 
-A `Projection` with `spec.destination.namespaceSelector` mirrors its source into every matching namespace and rolls up status into a single `DestinationWritten` condition — see the [fan-out example](https://github.com/be0x74a/projection/blob/main/examples/configmap-fan-out-selector.yaml). The `overlay` block applies uniformly: every destination gets the same labels and annotations.
+A `Projection` with `spec.destination.namespaceSelector` mirrors its source into every matching namespace and rolls up status into a single `DestinationWritten` condition — see the [fan-out example](https://github.com/projection-operator/projection/blob/main/examples/configmap-fan-out-selector.yaml). The `overlay` block applies uniformly: every destination gets the same labels and annotations.
 
-If you need **distinct overlays per destination** (different `tenant:` labels, per-namespace annotations, etc.), write one `Projection` per destination instead — see the [multi-destination example](https://github.com/be0x74a/projection/blob/main/examples/multiple-destinations-from-one-source.yaml). That pattern also keeps per-destination status independent: a `DestinationConflict` in one namespace doesn't mark the others as failed.
+If you need **distinct overlays per destination** (different `tenant:` labels, per-namespace annotations, etc.), write one `Projection` per destination instead — see the [multi-destination example](https://github.com/projection-operator/projection/blob/main/examples/multiple-destinations-from-one-source.yaml). That pattern also keeps per-destination status independent: a `DestinationConflict` in one namespace doesn't mark the others as failed.
 
 ### Same-cluster only
 
@@ -18,7 +18,7 @@ If you need cross-cluster, look at [Admiralty](https://admiralty.io/), [Open Clu
 
 ### Some Kinds need extra stripping rules
 
-A few Kinds carry **apiserver-allocated spec fields** that must be stripped before mirroring (otherwise the create at the destination is rejected as trying to supply an immutable field). This list grows case-by-case as gaps are reported — see the [umbrella issue](https://github.com/be0x74a/projection/issues/32) for the triage queue. Supported today in `droppedSpecFieldsByGVK`:
+A few Kinds carry **apiserver-allocated spec fields** that must be stripped before mirroring (otherwise the create at the destination is rejected as trying to supply an immutable field). This list grows case-by-case as gaps are reported — see the [umbrella issue](https://github.com/projection-operator/projection/issues/32) for the triage queue. Supported today in `droppedSpecFieldsByGVK`:
 
 | Kind                        | Stripped fields                                                                                 |
 | --------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -41,7 +41,7 @@ Some Kinds *look* like stripping candidates but aren't:
 
 ### Default source-mode silently ignores un-annotated sources
 
-`projection` ships with `--source-mode=allowlist` as the default (since v0.2). A source that does not carry `projection.be0x74a.io/projectable: "true"` is silently treated as not projectable — the `Projection` reports `SourceResolved=False reason=SourceNotProjectable`, and no destination is written. This is the safer default in multi-tenant clusters (source owners must opt their objects in), but it's a UX cliff for first-time users who copy a Projection example without reading the source-side requirement.
+`projection` ships with `--source-mode=allowlist` as the default (since v0.2). A source that does not carry `projection.sh/projectable: "true"` is silently treated as not projectable — the `Projection` reports `SourceResolved=False reason=SourceNotProjectable`, and no destination is written. This is the safer default in multi-tenant clusters (source owners must opt their objects in), but it's a UX cliff for first-time users who copy a Projection example without reading the source-side requirement.
 
 If you're mirroring sources you don't control (third-party CRs, controller-managed Secrets) and can't add the annotation, flip the operator to `--source-mode=permissive` (Helm value `sourceMode: permissive`) — every source then becomes projectable unless explicitly vetoed with `projectable: "false"`. The trade-off is documented in [Concepts §7](concepts.md#7-source-projectability-policy).
 
@@ -59,7 +59,7 @@ The chart's `supportedKinds` value lets cluster admins narrow the controller's `
 
 ### Pre-1.0 API surface
 
-The CRD is `projection.be0x74a.io/v1` and that group/version is the storage version, but the project as a whole is pre-1.0. Breaking changes to fields and behavior are allowed in minor releases until v1.0.0 ships; the [API stability page](api-stability.md) documents what v1.0.0 will commit to. Breaking changes are announced in the [changelog](https://github.com/be0x74a/projection/blob/main/CHANGELOG.md) and in release notes with migration guidance — see [the v0.2 upgrade guide](upgrade.md) for the most recent example.
+The CRD is `projection.sh/v1` and that group/version is the storage version, but the project as a whole is pre-1.0. Breaking changes to fields and behavior are allowed in minor releases until v1.0.0 ships; the [API stability page](api-stability.md) documents what v1.0.0 will commit to. Breaking changes are announced in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) and in release notes with migration guidance — see [the v0.2 upgrade guide](upgrade.md) for the most recent example.
 
 ## Roadmap
 
@@ -85,4 +85,4 @@ Scope to be defined — the north star is "make simple transforms trivial withou
 
 ## Getting involved
 
-Found a Kind we should support out of the box, a use case the API doesn't cover, a bug, or a documentation gap? [Open an issue](https://github.com/be0x74a/projection/issues/new). Contributions welcome — see `CONTRIBUTING.md` in the repo.
+Found a Kind we should support out of the box, a use case the API doesn't cover, a bug, or a documentation gap? [Open an issue](https://github.com/projection-operator/projection/issues/new). Contributions welcome — see `CONTRIBUTING.md` in the repo.

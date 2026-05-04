@@ -2,9 +2,9 @@
 
 This guide is for clusters already running `projection` v0.1.0-alpha.1. If you're installing for the first time, use the [getting-started guide](getting-started.md) instead.
 
-v0.2.0 introduces three breaking changes that require migration action. See the [CHANGELOG](https://github.com/be0x74a/projection/blob/main/CHANGELOG.md) for the full list of additive features shipped in the same release.
+v0.2.0 introduces three breaking changes that require migration action. See the [CHANGELOG](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) for the full list of additive features shipped in the same release.
 
-1. **Source opt-in is now required by default.** The new `allowlist` source-mode ignores sources that don't carry `projection.be0x74a.io/projectable="true"`. The migration script below annotates your existing sources; alternatively you can opt into permissive mode for v0.1-compatible behavior.
+1. **Source opt-in is now required by default.** The new `allowlist` source-mode ignores sources that don't carry `projection.sh/projectable="true"`. The migration script below annotates your existing sources; alternatively you can opt into permissive mode for v0.1-compatible behavior.
 2. **Kubernetes Events moved to `events.k8s.io/v1`.** Any automation using `kubectl get events --field-selector involvedObject.name=...` against Projections must switch to the new API and field names.
 3. **Source deletion now cleans up destinations.** Previously, deleting a source left destinations orphaned (the Projection reported `SourceFetchFailed` indefinitely). In v0.2 the controller removes every owned destination when the source goes away. No migration is needed — but if your runbook depended on the old behavior, adjust. Note that **existing orphans from v0.1 are not retroactively cleaned up** — they're cleaned up the next time their source returns 404, which for already-deleted sources means never. If you have known orphans, delete them by hand or recreate-and-redelete the source to trigger cleanup.
 
@@ -21,7 +21,7 @@ Estimated time for the migration: under five minutes, zero-downtime.
 Download and run the migration script in dry-run mode to see the plan:
 
 ```bash
-curl -O https://raw.githubusercontent.com/be0x74a/projection/main/hack/migrate-to-v1.sh
+curl -O https://raw.githubusercontent.com/projection-operator/projection/main/hack/migrate-to-v1.sh
 chmod +x migrate-to-v1.sh
 ./migrate-to-v1.sh
 # Despite the file name, this script is the v0.1→v0.2 cutover helper —
@@ -51,7 +51,7 @@ The script is idempotent — running it twice leaves the cluster in the same sta
 Then upgrade:
 
 ```bash
-helm upgrade projection oci://ghcr.io/be0x74a/charts/projection \
+helm upgrade projection oci://ghcr.io/projection-operator/charts/projection \
     --version 0.2.0 \
     -n projection-system
 ```
@@ -68,13 +68,13 @@ kubectl get projections -A
 If annotating every source is infeasible — for example in clusters where source objects are created by workloads you don't control — set `sourceMode: permissive` in your values and skip the migration script entirely:
 
 ```bash
-helm upgrade projection oci://ghcr.io/be0x74a/charts/projection \
+helm upgrade projection oci://ghcr.io/projection-operator/charts/projection \
     --version 0.2.0 \
     -n projection-system \
     --set sourceMode=permissive
 ```
 
-In permissive mode, any source is projectable unless explicitly opted out with `projection.be0x74a.io/projectable="false"` on the source object. Source-owner vetoes are honored in both modes.
+In permissive mode, any source is projectable unless explicitly opted out with `projection.sh/projectable="false"` on the source object. Source-owner vetoes are honored in both modes.
 
 **Trade-offs:**
 

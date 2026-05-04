@@ -18,7 +18,7 @@ The trade-off is real: a misconfigured or malicious `Projection` can cause the c
 
 The primary user-facing defense is the **source projectability policy**, documented in detail in [Concepts § 7](concepts.md#7-source-projectability-policy). The defaults:
 
-- **`--source-mode=allowlist`** (default). Sources must carry the annotation `projection.be0x74a.io/projectable: "true"` to be mirrored. A `Projection` pointing at an unannotated source gets `SourceResolved=False reason=SourceNotProjectable` in status.
+- **`--source-mode=allowlist`** (default). Sources must carry the annotation `projection.sh/projectable: "true"` to be mirrored. A `Projection` pointing at an unannotated source gets `SourceResolved=False reason=SourceNotProjectable` in status.
 - **Source owner veto**: annotation value `"false"` is *always* honored regardless of mode. Post-hoc veto garbage-collects the existing destination.
 
 This shifts the trust model from "anyone with Projection-create rights reads everything" to "source owners decide what's projectable." Clusters that want the historic wide-open behavior can set `--source-mode=permissive` explicitly.
@@ -44,7 +44,7 @@ supportedKinds:
 
 ```yaml
 supportedKinds:
-  - apiGroup: projection.be0x74a.io
+  - apiGroup: projection.sh
     resources: ["*"]
 ```
 
@@ -70,7 +70,7 @@ supportedKinds: []
 | --- | --- |
 | `apiGroup: ""` / `resources: [configmaps]` | ConfigMap in the core group only |
 | `apiGroup: "*"` / `resources: ["*"]` | Every resource in every group (equivalent to the default) |
-| `apiGroup: projection.be0x74a.io` / `resources: ["*"]` | Every resource in the `projection.be0x74a.io` group |
+| `apiGroup: projection.sh` / `resources: ["*"]` | Every resource in the `projection.sh` group |
 | `supportedKinds: []` | Nothing beyond the operator's own `Projection` CRs |
 
 Note the subtle distinction: `apiGroup: ""` means the **core API group only** (ConfigMap, Secret, Pod, …), while `apiGroup: "*"` means **every group including core**.
@@ -96,7 +96,7 @@ Note the subtle distinction: `apiGroup: ""` means the **core API group only** (C
 4. Deploy and verify:
 
    ```bash
-   helm upgrade projection oci://ghcr.io/be0x74a/charts/projection -f values.yaml
+   helm upgrade projection oci://ghcr.io/projection-operator/charts/projection -f values.yaml
    kubectl auth can-i get configmaps \
      --as=system:serviceaccount:projection-system:projection
    ```
@@ -112,7 +112,7 @@ Note the subtle distinction: `apiGroup: ""` means the **core API group only** (C
 
 Controlling *who can mirror what* is as important as the controller's RBAC. Two common patterns:
 
-**Kubernetes RBAC** — the simplest fix. Only grant `create` on `projections.projection.be0x74a.io` to the namespaces / service accounts that actually need it:
+**Kubernetes RBAC** — the simplest fix. Only grant `create` on `projections.projection.sh` to the namespaces / service accounts that actually need it:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -121,7 +121,7 @@ metadata:
   name: projection-author
   namespace: platform
 rules:
-  - apiGroups: ["projection.be0x74a.io"]
+  - apiGroups: ["projection.sh"]
     resources: ["projections"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ```
@@ -138,9 +138,9 @@ These rules run at admission time, so they fail `kubectl apply`, not at reconcil
 
 ### 3. Destination ownership annotation
 
-Every destination written by `projection` is stamped with `projection.be0x74a.io/owned-by: <projection-namespace>/<projection-name>`. This annotation is the controller's safety primitive: on every reconcile, before updating or deleting a destination, the controller checks the annotation against its own coordinates and refuses to touch objects it doesn't own. A would-be conflicting Projection (or a buggy human action) cannot silently overwrite an unrelated tool's object — `DestinationConflict` is reported on status instead.
+Every destination written by `projection` is stamped with `projection.sh/owned-by: <projection-namespace>/<projection-name>`. This annotation is the controller's safety primitive: on every reconcile, before updating or deleting a destination, the controller checks the annotation against its own coordinates and refuses to touch objects it doesn't own. A would-be conflicting Projection (or a buggy human action) cannot silently overwrite an unrelated tool's object — `DestinationConflict` is reported on status instead.
 
-A second marker, the label `projection.be0x74a.io/owned-by-uid: <projection-uid>`, lets the cleanup paths (stale-destination cleanup, finalizer sweep) find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking every namespace. The annotation is still verified after the label-driven list as a belt-and-braces guard against an attacker copying the label onto a stranger's object to trick the controller into deleting it.
+A second marker, the label `projection.sh/owned-by-uid: <projection-uid>`, lets the cleanup paths (stale-destination cleanup, finalizer sweep) find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking every namespace. The annotation is still verified after the label-driven list as a belt-and-braces guard against an attacker copying the label onto a stranger's object to trick the controller into deleting it.
 
 Treat both markers as part of the supported API: don't hand-edit them on objects in production. If you genuinely need to take over an existing object with `projection`, change its annotation deliberately — knowing that the controller will then update and delete it as if it had created it.
 
@@ -211,19 +211,19 @@ This keeps the IAM/RBAC trust path inside the cluster's own identity primitives 
 
 ## Image supply chain
 
-Release images are pushed to `ghcr.io/be0x74a/projection` and **cosign-signed** with GitHub's OIDC keyless workflow. Verify before pulling:
+Release images are pushed to `ghcr.io/projection-operator/projection` and **cosign-signed** with GitHub's OIDC keyless workflow. Verify before pulling:
 
 ```bash
-cosign verify ghcr.io/be0x74a/projection:v0.2.0 \
-  --certificate-identity-regexp "https://github.com/be0x74a/projection/.github/workflows/.*" \
+cosign verify ghcr.io/projection-operator/projection:v0.2.0 \
+  --certificate-identity-regexp "https://github.com/projection-operator/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The Helm chart is published to `oci://ghcr.io/be0x74a/charts/projection` and signed with the same workflow:
+The Helm chart is published to `oci://ghcr.io/projection-operator/charts/projection` and signed with the same workflow:
 
 ```bash
-cosign verify oci://ghcr.io/be0x74a/charts/projection:0.2.0 \
-  --certificate-identity-regexp "https://github.com/be0x74a/projection/.github/workflows/.*" \
+cosign verify oci://ghcr.io/projection-operator/charts/projection:0.2.0 \
+  --certificate-identity-regexp "https://github.com/projection-operator/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
@@ -241,4 +241,4 @@ Together these are enough to answer "who created this object, when, and on whose
 
 ## Reporting vulnerabilities
 
-Privately via [GitHub Security Advisories](https://github.com/be0x74a/projection/security/advisories/new). See `SECURITY.md` in the repo for the process.
+Privately via [GitHub Security Advisories](https://github.com/projection-operator/projection/security/advisories/new). See `SECURITY.md` in the repo for the process.

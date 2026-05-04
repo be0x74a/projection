@@ -15,7 +15,7 @@ This walks through installing the `projection` operator and creating your first 
 ### Option 1 — Helm (OCI)
 
 ```bash
-helm install projection oci://ghcr.io/be0x74a/charts/projection \
+helm install projection oci://ghcr.io/projection-operator/charts/projection \
   --version 0.2.0 \
   --namespace projection-system --create-namespace
 ```
@@ -23,7 +23,7 @@ helm install projection oci://ghcr.io/be0x74a/charts/projection \
 ### Option 2 — `kubectl apply`
 
 ```bash
-kubectl apply -f https://github.com/be0x74a/projection/releases/download/v0.2.0/install.yaml
+kubectl apply -f https://github.com/projection-operator/projection/releases/download/v0.2.0/install.yaml
 ```
 
 Either way, verify the operator is healthy:
@@ -38,7 +38,7 @@ You should see one `Running` controller pod. If it's `CrashLoopBackOff`, jump to
 ## Source opt-in
 
 `projection` ships with `--source-mode=allowlist` as the default. That means a
-source object must carry the annotation `projection.be0x74a.io/projectable:
+source object must carry the annotation `projection.sh/projectable:
 "true"` to be mirrored. Without it, the `Projection` status reports
 `SourceResolved=False reason=SourceNotProjectable` and no destination is
 written.
@@ -52,7 +52,7 @@ metadata:
   name: app-config
   namespace: default
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 ```
 
 The value `"false"` is always honored as a source-owner veto — in any mode,
@@ -70,7 +70,7 @@ section.
 Apply the canonical ConfigMap-across-namespaces example:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/be0x74a/projection/main/examples/configmap-cross-namespace.yaml
+kubectl apply -f https://raw.githubusercontent.com/projection-operator/projection/main/examples/configmap-cross-namespace.yaml
 ```
 
 This creates:
@@ -101,7 +101,7 @@ You should see the same `.data` as the source plus the ownership annotation:
 ```yaml
 metadata:
   annotations:
-    projection.be0x74a.io/owned-by: default/app-config-to-tenant-a
+    projection.sh/owned-by: default/app-config-to-tenant-a
 ```
 
 ## Sources outside the core group: prefer `<group>/*`
@@ -112,7 +112,7 @@ sources in any **named group** — built-ins like `apps`, `networking.k8s.io`,
 or your own CRDs at `example.com` — reach for the unpinned form instead:
 
 ```yaml
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: my-deployment-mirror
@@ -135,7 +135,7 @@ reconcile rather than failing with `SourceResolutionFailed` and
 garbage-collecting the destination.
 
 As with the ConfigMap example above, the source Deployment must carry
-`projection.be0x74a.io/projectable: "true"` if the controller is running in
+`projection.sh/projectable: "true"` if the controller is running in
 allowlist mode (the default). See [Source opt-in](#source-opt-in) above.
 
 The resolved version is reported in the `SourceResolved` condition message,
@@ -194,7 +194,7 @@ kubectl -n tenant-a get configmap app-config
 # Error from server (NotFound): ...
 ```
 
-The finalizer `projection.be0x74a.io/finalizer` is what guarantees this cleanup.
+The finalizer `projection.sh/finalizer` is what guarantees this cleanup.
 
 ## Uninstalling the operator
 
@@ -214,7 +214,7 @@ helm uninstall projection -n projection-system
 # (Or, for the install.yaml path: kubectl delete -f install.yaml)
 
 # 4. Helm 3 does not delete CRDs on uninstall. Remove it explicitly:
-kubectl delete crd projections.projection.be0x74a.io
+kubectl delete crd projections.projection.sh
 ```
 
 Already uninstalled out of order and your CRD delete is hanging? See [CRD deletion is stuck after `helm uninstall`](#crd-deletion-is-stuck-after-helm-uninstall).
@@ -247,7 +247,7 @@ Resolve by one of:
 
   ```bash
   kubectl -n <dst-ns> annotate <kind> <name> \
-    projection.be0x74a.io/owned-by=<projection-ns>/<projection-name>
+    projection.sh/owned-by=<projection-ns>/<projection-name>
   ```
 
   The next reconcile will then update the destination to match the source.
@@ -266,11 +266,11 @@ The source object returned 404 from the apiserver. Every destination owned by th
 
 ### `Ready=False reason=SourceNotProjectable`
 
-The controller is in the default `allowlist` mode and the source object lacks `projection.be0x74a.io/projectable: "true"`. Annotate the source, or switch the operator to `permissive` mode (Helm value `sourceMode: permissive`).
+The controller is in the default `allowlist` mode and the source object lacks `projection.sh/projectable: "true"`. Annotate the source, or switch the operator to `permissive` mode (Helm value `sourceMode: permissive`).
 
 ### `Ready=False reason=SourceOptedOut`
 
-The source carries `projection.be0x74a.io/projectable: "false"` — the source owner has explicitly vetoed projection. The destination, if one existed, has been garbage-collected. Honor the veto, or coordinate with the source owner.
+The source carries `projection.sh/projectable: "false"` — the source owner has explicitly vetoed projection. The destination, if one existed, has been garbage-collected. Honor the veto, or coordinate with the source owner.
 
 ### `Ready=False reason=NamespaceResolutionFailed`
 
@@ -296,7 +296,7 @@ If the last event is recent and the destination still looks wrong, the controlle
 
 ### CRD deletion is stuck after `helm uninstall`
 
-`kubectl delete crd projections.projection.be0x74a.io` hangs. Cause: one or more Projection CRs still carry `projection.be0x74a.io/finalizer`, and the controller — the only thing that can remove it — was uninstalled before they were cleaned up. The apiserver waits for every instance to terminate before deleting the CRD, and the instances cannot terminate without the controller.
+`kubectl delete crd projections.projection.sh` hangs. Cause: one or more Projection CRs still carry `projection.sh/finalizer`, and the controller — the only thing that can remove it — was uninstalled before they were cleaned up. The apiserver waits for every instance to terminate before deleting the CRD, and the instances cannot terminate without the controller.
 
 Strip the finalizer from every remaining Projection by hand:
 
@@ -308,7 +308,7 @@ kubectl get projection -A -o name | \
 Then re-issue the CRD delete:
 
 ```bash
-kubectl delete crd projections.projection.be0x74a.io
+kubectl delete crd projections.projection.sh
 ```
 
 This bypass skips the destination-cleanup the finalizer normally runs, so any destinations the Projections previously created stay in place — owned by nothing. Garbage-collect them by hand if you want them gone. To avoid this in future, follow the order in [Uninstalling the operator](#uninstalling-the-operator).

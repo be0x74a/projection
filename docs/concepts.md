@@ -57,7 +57,7 @@ spec:
   destination:
     namespaceSelector:
       matchLabels:
-        projection.be0x74a.io/mirror: "true"
+        projection.sh/mirror: "true"
     name: shared-config     # optional; same name used in every matching namespace
 ```
 
@@ -97,7 +97,7 @@ Regardless of what you put in overlay, the controller always stamps:
 
 ```yaml
 annotations:
-  projection.be0x74a.io/owned-by: <projection-namespace>/<projection-name>
+  projection.sh/owned-by: <projection-namespace>/<projection-name>
 ```
 
 This is how ownership detection works (next section).
@@ -106,13 +106,13 @@ This is how ownership detection works (next section).
 
 Every destination written by a `Projection` is stamped with two ownership markers:
 
-- **Annotation** `projection.be0x74a.io/owned-by: <projection-ns>/<projection-name>` — the canonical proof of ownership the controller checks before writing or deleting.
-- **Label** `projection.be0x74a.io/owned-by-uid: <projection-uid>` — the same proof in label form, used by the cleanup paths (stale-destination cleanup and finalizer sweep) to find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking every namespace. The annotation is still verified after the label-driven list, as a belt-and-braces guard against a malicious actor copying the label onto a stranger's object.
+- **Annotation** `projection.sh/owned-by: <projection-ns>/<projection-name>` — the canonical proof of ownership the controller checks before writing or deleting.
+- **Label** `projection.sh/owned-by-uid: <projection-uid>` — the same proof in label form, used by the cleanup paths (stale-destination cleanup and finalizer sweep) to find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking every namespace. The annotation is still verified after the label-driven list, as a belt-and-braces guard against a malicious actor copying the label onto a stranger's object.
 
 On every reconcile, before touching an existing destination, the controller checks:
 
 ```
-obj.metadata.annotations["projection.be0x74a.io/owned-by"] == "<projection-ns>/<projection-name>"
+obj.metadata.annotations["projection.sh/owned-by"] == "<projection-ns>/<projection-name>"
 ```
 
 The three outcomes:
@@ -127,7 +127,7 @@ This is what prevents `projection` from silently clobbering an object somebody e
 
 ## 5. Finalizer
 
-When the Projection is first reconciled, the controller adds the finalizer `projection.be0x74a.io/finalizer`. On deletion:
+When the Projection is first reconciled, the controller adds the finalizer `projection.sh/finalizer`. On deletion:
 
 1. The finalizer blocks final removal.
 2. The controller looks up the destination.
@@ -182,7 +182,7 @@ Because the operator holds cluster-wide read RBAC, anyone authorized to create a
 
 | Mode | Behavior |
 |---|---|
-| `allowlist` (default) | Source must carry `projection.be0x74a.io/projectable: "true"`. Missing or other values are treated as not projectable. |
+| `allowlist` (default) | Source must carry `projection.sh/projectable: "true"`. Missing or other values are treated as not projectable. |
 | `permissive` | Any source is projectable *unless* it carries the veto annotation. |
 
 Set via the CLI flag `--source-mode=permissive|allowlist` (or the Helm value `sourceMode`).
@@ -192,7 +192,7 @@ Set via the CLI flag `--source-mode=permissive|allowlist` (or the Helm value `so
 ```yaml
 metadata:
   annotations:
-    projection.be0x74a.io/projectable: "false"    # hard stop
+    projection.sh/projectable: "false"    # hard stop
 ```
 
 When a previously-projected source flips to `"false"`, the destination is **garbage-collected on the next reconcile** — owners retract, not just block future copies.

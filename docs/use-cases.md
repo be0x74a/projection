@@ -1,17 +1,17 @@
 # Use cases
 
-Six worked examples, all shipped as-is in the repo under [`examples/`](https://github.com/be0x74a/projection/tree/main/examples). Each section below quotes the interesting bits; follow the links for the full manifests (the examples include namespace scaffolding, illustrative ConfigMaps/Secrets, etc.).
+Six worked examples, all shipped as-is in the repo under [`examples/`](https://github.com/projection-operator/projection/tree/main/examples). Each section below quotes the interesting bits; follow the links for the full manifests (the examples include namespace scaffolding, illustrative ConfigMaps/Secrets, etc.).
 
-> **A note on source opt-in.** The controller ships with `--source-mode=allowlist` as the default, so every source object below must carry `projection.be0x74a.io/projectable: "true"` for the destination to be written. The example files in [`examples/`](https://github.com/be0x74a/projection/tree/main/examples) already include the annotation. If you can't annotate the source — third-party CRs, controller-managed Secrets — flip the operator to `permissive` mode (Helm value `sourceMode: permissive`); the source-owner veto (`="false"`) still works in that mode. See [Source opt-in](getting-started.md#source-opt-in) for the longer explanation.
+> **A note on source opt-in.** The controller ships with `--source-mode=allowlist` as the default, so every source object below must carry `projection.sh/projectable: "true"` for the destination to be written. The example files in [`examples/`](https://github.com/projection-operator/projection/tree/main/examples) already include the annotation. If you can't annotate the source — third-party CRs, controller-managed Secrets — flip the operator to `permissive` mode (Helm value `sourceMode: permissive`); the source-owner veto (`="false"`) still works in that mode. See [Source opt-in](getting-started.md#source-opt-in) for the longer explanation.
 
 ## 1. `ConfigMap` fan-out across namespaces
 
-**File:** [`examples/configmap-fan-out-selector.yaml`](https://github.com/be0x74a/projection/blob/main/examples/configmap-fan-out-selector.yaml)
+**File:** [`examples/configmap-fan-out-selector.yaml`](https://github.com/projection-operator/projection/blob/main/examples/configmap-fan-out-selector.yaml)
 
 The canonical "same config, many namespaces" case. One `Projection` mirrors the source into every namespace carrying a matching label.
 
 ```yaml
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: app-config-fanout
@@ -25,24 +25,24 @@ spec:
   destination:
     namespaceSelector:
       matchLabels:
-        projection.be0x74a.io/mirror: "true"
+        projection.sh/mirror: "true"
     # name omitted → defaults to source.name ("app-config") in every matching namespace
 ```
 
-**Expected outcome:** `configmap/app-config` appears in every labeled namespace with the same `.data` plus `projection.be0x74a.io/owned-by: default/app-config-fanout`. Edits to the source propagate to all destinations in ~100 ms. Labeling a new namespace triggers a reconcile and the destination appears there too; removing the label cleans up the destination.
+**Expected outcome:** `configmap/app-config` appears in every labeled namespace with the same `.data` plus `projection.sh/owned-by: default/app-config-fanout`. Edits to the source propagate to all destinations in ~100 ms. Labeling a new namespace triggers a reconcile and the destination appears there too; removing the label cleans up the destination.
 
 **Gotchas:** if any matching namespace already has an unowned `ConfigMap/app-config`, the Projection reports `DestinationWritten=False reason=DestinationConflict` for that namespace (other namespaces still get their destinations). The conflict message identifies which namespace is problematic.
 
-**When to pick single namespace instead:** if you need per-destination overlays (e.g. a `tenant:` label distinct per namespace), one `Projection` per destination is still the right shape — see [`examples/multiple-destinations-from-one-source.yaml`](https://github.com/be0x74a/projection/blob/main/examples/multiple-destinations-from-one-source.yaml).
+**When to pick single namespace instead:** if you need per-destination overlays (e.g. a `tenant:` label distinct per namespace), one `Projection` per destination is still the right shape — see [`examples/multiple-destinations-from-one-source.yaml`](https://github.com/projection-operator/projection/blob/main/examples/multiple-destinations-from-one-source.yaml).
 
 ## 2. `Secret` across namespaces
 
-**File:** [`examples/secret-cross-namespace.yaml`](https://github.com/be0x74a/projection/blob/main/examples/secret-cross-namespace.yaml)
+**File:** [`examples/secret-cross-namespace.yaml`](https://github.com/projection-operator/projection/blob/main/examples/secret-cross-namespace.yaml)
 
 The distribute-a-TLS-cert scenario — typically the source `Secret` is authored by `cert-manager`, `external-secrets`, or `sealed-secrets`. When the destination is a single namespace you can set `namespace` directly; when the cert should reach every labeled namespace, use `namespaceSelector` as in use case 1.
 
 ```yaml
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: tls-into-app-prod
@@ -64,12 +64,12 @@ spec:
 
 ## 3. `Service` mirror
 
-**File:** [`examples/service-mirror.yaml`](https://github.com/be0x74a/projection/blob/main/examples/service-mirror.yaml)
+**File:** [`examples/service-mirror.yaml`](https://github.com/projection-operator/projection/blob/main/examples/service-mirror.yaml)
 
 Demonstrates **Kind-aware stripping**. A `Service`'s `spec.clusterIP` is apiserver-allocated; naively copying it to another namespace would fail with `spec.clusterIP: field is immutable`.
 
 ```yaml
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: api-into-team-b
@@ -95,7 +95,7 @@ kubectl get svc -n team-b  api -o jsonpath='{.spec.clusterIP}'   # 10.96.Y.Y (di
 
 ## 4. Per-destination overlays
 
-**File:** [`examples/multiple-destinations-from-one-source.yaml`](https://github.com/be0x74a/projection/blob/main/examples/multiple-destinations-from-one-source.yaml)
+**File:** [`examples/multiple-destinations-from-one-source.yaml`](https://github.com/projection-operator/projection/blob/main/examples/multiple-destinations-from-one-source.yaml)
 
 Use case 1 (`namespaceSelector` fan-out) gives every destination the *same* overlay — labels and annotations are evaluated once, then stamped on every copy. When each destination needs a **different** overlay (a tenant tag, an environment label, a per-team annotation), declare one `Projection` per destination instead. A separate `Projection` is also the right shape when the destinations don't share a label predicate — three pre-existing namespaces created by other teams, for example, with no shared marker for the selector to match on.
 
@@ -124,7 +124,7 @@ Use case 1 (`namespaceSelector` fan-out) gives every destination the *same* over
 
 ## 5. Overlay labels
 
-**File:** [`examples/with-overlay-labels.yaml`](https://github.com/be0x74a/projection/blob/main/examples/with-overlay-labels.yaml)
+**File:** [`examples/with-overlay-labels.yaml`](https://github.com/projection-operator/projection/blob/main/examples/with-overlay-labels.yaml)
 
 Tag the destination with tenant/team/environment labels your observability stack can select on.
 
@@ -143,7 +143,7 @@ spec:
 
 ## 6. Overlay annotations
 
-**File:** [`examples/with-overlay-annotations.yaml`](https://github.com/be0x74a/projection/blob/main/examples/with-overlay-annotations.yaml)
+**File:** [`examples/with-overlay-annotations.yaml`](https://github.com/projection-operator/projection/blob/main/examples/with-overlay-annotations.yaml)
 
 Same merge rules as labels — use it to stamp provenance:
 
@@ -155,9 +155,9 @@ spec:
       mirror.example.com/team: platform-eng
 ```
 
-**Expected outcome:** destination annotations include both overlay entries plus the always-stamped `projection.be0x74a.io/owned-by: <proj-ns>/<proj-name>`.
+**Expected outcome:** destination annotations include both overlay entries plus the always-stamped `projection.sh/owned-by: <proj-ns>/<proj-name>`.
 
 **Gotchas:**
 
-- Don't try to set `projection.be0x74a.io/owned-by` via overlay — the controller overwrites it on every reconcile.
+- Don't try to set `projection.sh/owned-by` via overlay — the controller overwrites it on every reconcile.
 - `kubectl.kubernetes.io/last-applied-configuration` is always stripped on the destination (carrying it would break three-way merge on later `kubectl apply` calls against the destination).
