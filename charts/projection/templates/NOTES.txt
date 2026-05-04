@@ -11,7 +11,7 @@ projection {{ .Chart.AppVersion }} has been installed in namespace {{ .Release.N
 
 3. Create your first Projection. A minimal example looks like:
 
-   apiVersion: projection.be0x74a.io/v1
+   apiVersion: projection.sh/v1
    kind: Projection
    metadata:
      name: my-first-projection
@@ -26,9 +26,9 @@ projection {{ .Chart.AppVersion }} has been installed in namespace {{ .Release.N
        namespace: my-target-namespace
        name: my-mirrored-cm
 
-See the chart README and https://github.com/be0x74a/projection for more examples.
+See the chart README and https://github.com/projection-operator/projection for more examples.
 
 NOTE: CRDs were installed on first install only. Helm does not upgrade or
 delete CRDs. To remove the CRD manually:
 
-   kubectl delete crd projections.projection.be0x74a.io
+   kubectl delete crd projections.projection.sh

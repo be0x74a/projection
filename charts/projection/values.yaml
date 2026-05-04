@@ -4,7 +4,7 @@
 # -- Container image for the controller-manager.
 image:
   # -- Image repository. Override for a private registry or custom build.
-  repository: ghcr.io/be0x74a/projection
+  repository: ghcr.io/projection-operator/projection
   # -- Image tag. Empty string falls back to the chart's appVersion.
   tag: ""
   # -- Image pull policy. Defaults to IfNotPresent for tagged images.
@@ -78,7 +78,7 @@ healthProbe:
 # discussion of the trade-offs.
 #
 #   "allowlist" (default, secure-by-default): every source object must
-#     carry the annotation projection.be0x74a.io/projectable="true". Matches
+#     carry the annotation projection.sh/projectable="true". Matches
 #     the pattern used by emberstack/Reflector.
 #   "permissive": any source is projectable unless explicitly opted out.
 #     Closer to the v0.1.0-alpha.1 behavior and appropriate for clusters
@@ -114,7 +114,7 @@ sourceMode: allowlist
 #
 # Example — moderate, any resource in a trusted group:
 # supportedKinds:
-#   - apiGroup: projection.be0x74a.io
+#   - apiGroup: projection.sh
 #     resources: ["*"]
 #
 # Example — disable entirely (operator becomes inert for external Kinds):

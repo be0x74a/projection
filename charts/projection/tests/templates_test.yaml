@@ -151,7 +151,7 @@ tests:
       # Projection-own rules are still present (unchanged).
       - equal:
           path: rules[1].apiGroups
-          value: [projection.be0x74a.io]
+          value: [projection.sh]
       - equal:
           path: rules[1].resources
           value: [projections]
@@ -163,10 +163,10 @@ tests:
     asserts:
       - isKind:
           of: ClusterRole
-      # First rule is now the projection.be0x74a.io rule — no broad entry.
+      # First rule is now the projection.sh rule — no broad entry.
       - equal:
           path: rules[0].apiGroups
-          value: [projection.be0x74a.io]
+          value: [projection.sh]
       - equal:
           path: rules[0].resources
           value: [projections]
@@ -204,18 +204,18 @@ tests:
       # Own-rules remain in position 2, 3, 4.
       - equal:
           path: rules[2].apiGroups
-          value: [projection.be0x74a.io]
+          value: [projection.sh]
 
   - it: renders wildcard resources for a trusted apiGroup
     template: clusterrole.yaml
     set:
       supportedKinds:
-        - apiGroup: projection.be0x74a.io
+        - apiGroup: projection.sh
           resources: ["*"]
     asserts:
       - equal:
           path: rules[0].apiGroups
-          value: [projection.be0x74a.io]
+          value: [projection.sh]
       - equal:
           path: rules[0].resources
           value: ["*"]

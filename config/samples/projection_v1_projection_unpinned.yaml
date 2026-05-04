@@ -1,4 +1,4 @@
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   labels:
