@@ -1,6 +1,6 @@
 site_name: projection
 site_description: The Kubernetes CRD for declarative resource mirroring.
-site_url: https://projection.sh/
+site_url: https://docs.projection.sh/
 repo_url: https://github.com/projection-operator/projection
 repo_name: projection-operator/projection
 edit_uri: edit/main/docs/

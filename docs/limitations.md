@@ -1,6 +1,6 @@
 # Limitations & roadmap
 
-`projection` is pre-1.0. The CRD is at `projection.sh/v1`, and the surface that will be frozen at v1.0.0 is documented in [API stability](api-stability.md). Pre-1.0 minor releases can carry breaking changes — v0.2 ships three (default `sourceMode` flip, Events moved to `events.k8s.io/v1`, the new `namespaceSelector` field) and the [upgrade guide](upgrade.md) walks through them. This page is the standing list of "things that don't work today" and the rough roadmap for closing the gaps.
+`projection` is pre-1.0. The CRD is at `projection.sh/v1`, and the surface that will be frozen at v1.0.0 is documented in [API stability](api-stability.md). Pre-1.0 minor releases can carry breaking changes — v0.2 ships three (default `sourceMode` flip, Events moved to `events.k8s.io/v1`, the new `namespaceSelector` field) listed in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md). This page is the standing list of "things that don't work today" and the rough roadmap for closing the gaps.
 
 ## Known limitations
 
@@ -59,7 +59,7 @@ The chart's `supportedKinds` value lets cluster admins narrow the controller's `
 
 ### Pre-1.0 API surface
 
-The CRD is `projection.sh/v1` and that group/version is the storage version, but the project as a whole is pre-1.0. Breaking changes to fields and behavior are allowed in minor releases until v1.0.0 ships; the [API stability page](api-stability.md) documents what v1.0.0 will commit to. Breaking changes are announced in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) and in release notes with migration guidance — see [the v0.2 upgrade guide](upgrade.md) for the most recent example.
+The CRD is `projection.sh/v1` and that group/version is the storage version, but the project as a whole is pre-1.0. Breaking changes to fields and behavior are allowed in minor releases until v1.0.0 ships; the [API stability page](api-stability.md) documents what v1.0.0 will commit to. Breaking changes are announced in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) and in release notes with migration guidance.
 
 ## Roadmap
 

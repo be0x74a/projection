@@ -151,7 +151,7 @@ Roughly 40 ms of spread across 100 destinations.
   time for the selector profile is dominated by the worker pool issuing
   destination writes in parallel (default 16, configurable via the
   `--selector-write-concurrency` flag / `selectorWriteConcurrency` Helm
-  value — see [observability.md](observability.md#--selector-write-concurrency--selectorwriteconcurrency-default-16));
+  value — see [observability.md](observability.md#-selector-write-concurrency-selectorwriteconcurrency-default-16));
   throughput past that depends on kube-apiserver APF priority-level
   budgets at the worker count you've configured.
 - Create/delete churn across unique GVKs: the controller's `watched` map
