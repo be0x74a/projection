@@ -5,7 +5,7 @@
 #   kubectl get configmap -n tenant-a app-config -o yaml
 #
 # The destination ConfigMap will carry the same .data as the source plus
-# an ownership annotation `projection.be0x74a.io/owned-by`. Editing the
+# an ownership annotation `projection.sh/owned-by`. Editing the
 # source propagates to the destination in ~100ms.
 ---
 apiVersion: v1
@@ -22,12 +22,12 @@ metadata:
     # Source owner opts this ConfigMap in to projection. Required under the
     # default allowlist source-mode; harmless in permissive mode. Setting
     # this to "false" is always honored as an opt-out veto.
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   log_level: info
   feature_flag: enabled
 ---
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: app-config-to-tenant-a

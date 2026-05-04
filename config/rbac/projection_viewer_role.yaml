@@ -8,7 +8,7 @@ metadata:
   name: projection-viewer-role
 rules:
 - apiGroups:
-  - projection.be0x74a.io
+  - projection.sh
   resources:
   - projections
   verbs:
@@ -16,7 +16,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - projection.be0x74a.io
+  - projection.sh
   resources:
   - projections/status
   verbs:

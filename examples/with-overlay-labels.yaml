@@ -26,11 +26,11 @@ metadata:
     tenant: shared
   annotations:
     # Opt-in required by the default allowlist source-mode.
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   endpoint: https://api.example.com
 ---
-apiVersion: projection.be0x74a.io/v1
+apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: shared-config-tenant-a
