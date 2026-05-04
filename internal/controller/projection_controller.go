@@ -49,9 +49,9 @@ import (
 )
 
 const (
-	finalizerName         = "projection.be0x74a.io/finalizer"
-	ownedByAnnotation     = "projection.be0x74a.io/owned-by"
-	projectableAnnotation = "projection.be0x74a.io/projectable"
+	finalizerName         = "projection.sh/finalizer"
+	ownedByAnnotation     = "projection.sh/owned-by"
+	projectableAnnotation = "projection.sh/projectable"
 
 	// ownedByUIDLabel is a label stamped on every destination by
 	// buildDestination. Value is the owning Projection's UID. Enables
@@ -60,7 +60,7 @@ const (
 	// (#33). Label values are capped at 63 chars and permit [a-z0-9-] plus
 	// dashes; Kubernetes UIDs are RFC-4122 UUIDs (36 chars), both within
 	// the label-value regex and well under the length limit.
-	ownedByUIDLabel = "projection.be0x74a.io/owned-by-uid"
+	ownedByUIDLabel = "projection.sh/owned-by-uid"
 
 	conditionReady              = "Ready"
 	conditionSourceResolved     = "SourceResolved"
@@ -100,11 +100,11 @@ type SourceMode string
 const (
 	// SourceModePermissive allows any source object to be projected. Source
 	// owners can still veto individual objects with the
-	// projection.be0x74a.io/projectable="false" annotation.
+	// projection.sh/projectable="false" annotation.
 	SourceModePermissive SourceMode = "permissive"
 
 	// SourceModeAllowlist requires every source object to carry the
-	// projection.be0x74a.io/projectable="true" annotation before it can be
+	// projection.sh/projectable="true" annotation before it can be
 	// mirrored. This is the default — Kubernetes convention favors
 	// opt-in for cluster-scoped operators with broad read RBAC.
 	SourceModeAllowlist SourceMode = "allowlist"
@@ -199,7 +199,7 @@ func resolvedVersionMessage(src projectionv1.SourceRef, resolvedVersion string) 
 // writes on source objects to measure end-to-end propagation latency. Value
 // is a unix-nano timestamp. Presence of the annotation triggers a per-phase
 // latency log line in Reconcile; absence makes this a no-op in production.
-const benchStampAnnotation = "bench.projection.be0x74a.io/stamp"
+const benchStampAnnotation = "bench.projection.sh/stamp"
 
 // logBenchStampLatency, when the source carries the benchmark harness's
 // stamp annotation, logs the wall-clock delta from stamp issuance at the
@@ -223,9 +223,9 @@ func logBenchStampLatency(ctx context.Context, source *unstructured.Unstructured
 	)
 }
 
-// +kubebuilder:rbac:groups=projection.be0x74a.io,resources=projections,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=projection.be0x74a.io,resources=projections/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=projection.be0x74a.io,resources=projections/finalizers,verbs=update
+// +kubebuilder:rbac:groups=projection.sh,resources=projections,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=projection.sh,resources=projections/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=projection.sh,resources=projections/finalizers,verbs=update
 // Projection can mirror any Kind, so the controller needs broad access.
 // +kubebuilder:rbac:groups="*",resources="*",verbs=get;list;watch;create;update;patch;delete
 

@@ -1701,7 +1701,7 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 				Name:      dottedName,
 				Namespace: sourceNS,
 				Annotations: map[string]string{
-					"projection.be0x74a.io/projectable": "true",
+					"projection.sh/projectable": "true",
 				},
 			},
 			Data: map[string]string{"foo": "bar"},
@@ -1740,7 +1740,7 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		var got corev1.ConfigMap
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: destNS, Name: dottedName}, &got)).To(Succeed())
 		Expect(got.GetAnnotations()).To(HaveKeyWithValue(
-			"projection.be0x74a.io/owned-by",
+			"projection.sh/owned-by",
 			projKey.Namespace+"/"+projKey.Name,
 		))
 	})

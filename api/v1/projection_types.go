@@ -92,7 +92,7 @@ type Overlay struct {
 	// Annotations are merged with the source object's metadata.annotations
 	// before writing to the destination. Keys set here win on conflict
 	// with source annotations. Note: the controller always overwrites
-	// projection.be0x74a.io/owned-by to its own bookkeeping value;
+	// projection.sh/owned-by to its own bookkeeping value;
 	// attempts to set it here are ignored.
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
@@ -135,7 +135,7 @@ type ProjectionStatus struct {
 // Projection mirrors one Kubernetes object from a source location to one or
 // more destination namespaces, declaratively and conflict-safely. Source
 // edits propagate to destinations in ~100 ms via dynamic watches. Destinations
-// carry a projection.be0x74a.io/owned-by annotation the controller uses to
+// carry a projection.sh/owned-by annotation the controller uses to
 // refuse overwriting resources it did not create.
 type Projection struct {
 	metav1.TypeMeta   `json:",inline"`

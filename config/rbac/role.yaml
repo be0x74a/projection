@@ -17,7 +17,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - projection.be0x74a.io
+  - projection.sh
   resources:
   - projections
   verbs:
@@ -29,13 +29,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - projection.be0x74a.io
+  - projection.sh
   resources:
   - projections/finalizers
   verbs:
   - update
 - apiGroups:
-  - projection.be0x74a.io
+  - projection.sh
   resources:
   - projections/status
   verbs:

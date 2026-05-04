@@ -50,7 +50,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `labels` _object (keys:string, values:string)_ | Labels are merged with the source object's metadata.labels before<br />writing to the destination. Keys set here win on conflict with<br />source labels. |  | Optional: \{\} <br /> |
-| `annotations` _object (keys:string, values:string)_ | Annotations are merged with the source object's metadata.annotations<br />before writing to the destination. Keys set here win on conflict<br />with source annotations. Note: the controller always overwrites<br />projection.be0x74a.io/owned-by to its own bookkeeping value;<br />attempts to set it here are ignored. |  | Optional: \{\} <br /> |
+| `annotations` _object (keys:string, values:string)_ | Annotations are merged with the source object's metadata.annotations<br />before writing to the destination. Keys set here win on conflict<br />with source annotations. Note: the controller always overwrites<br />projection.sh/owned-by to its own bookkeeping value;<br />attempts to set it here are ignored. |  | Optional: \{\} <br /> |
 
 
 #### Projection
@@ -60,7 +60,7 @@ _Appears in:_
 Projection mirrors one Kubernetes object from a source location to one or
 more destination namespaces, declaratively and conflict-safely. Source
 edits propagate to destinations in ~100 ms via dynamic watches. Destinations
-carry a projection.be0x74a.io/owned-by annotation the controller uses to
+carry a projection.sh/owned-by annotation the controller uses to
 refuse overwriting resources it did not create.
 
 
