@@ -83,7 +83,7 @@ func bindFlags(fs *flag.FlagSet) *runtimeConfig {
 	fs.StringVar(&c.sourceModeFlag, "source-mode", "allowlist",
 		"Policy for which source objects are projectable. "+
 			"\"allowlist\" (default) requires the source to carry annotation "+
-			"projection.be0x74a.io/projectable=\"true\". "+
+			"projection.sh/projectable=\"true\". "+
 			"\"permissive\" allows any source. "+
 			"An annotation value of \"false\" is always honored as an opt-out "+
 			"regardless of mode.")
@@ -160,7 +160,7 @@ func main() {
 		Metrics:                metricsServerOptions,
 		HealthProbeBindAddress: cfg.probeAddr,
 		LeaderElection:         cfg.enableLeaderElection,
-		LeaderElectionID:       "92777bdc.be0x74a.io",
+		LeaderElectionID:       "92777bdc.projection.sh",
 		LeaseDuration:          &cfg.leaderElectionLeaseDuration,
 	})
 	if err != nil {

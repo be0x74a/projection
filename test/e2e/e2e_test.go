@@ -36,7 +36,7 @@ const (
 	// Helm uses the release name. Both label the pod control-plane=controller-manager.
 	operatorSelector = "control-plane=controller-manager"
 
-	ownedByAnnotation = "projection.be0x74a.io/owned-by"
+	ownedByAnnotation = "projection.sh/owned-by"
 
 	// runID is appended to every resource created by the suite so concurrent
 	// runs or leftover artifacts from earlier runs never collide.
@@ -154,14 +154,14 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   color: blue
   shape: square
 `, cmName, srcNS))).To(Succeed())
 
 			By("creating the Projection")
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -220,7 +220,7 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 spec:
   selector:
     app: echo
@@ -238,7 +238,7 @@ spec:
 			}, defaultEventually, defaultTick).ShouldNot(Or(BeEmpty(), Equal("None")))
 
 			By("creating the Projection")
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -304,13 +304,13 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   origin: projection
 `, cmName, srcNS))).To(Succeed())
 
 			By("creating a Projection that targets the conflicting destination")
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -379,12 +379,12 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   version: "1"
 `, cmName, srcNS))).To(Succeed())
 
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -440,12 +440,12 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   k: v
 `, cmName, srcNS))).To(Succeed())
 
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -506,12 +506,12 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   k: v
 `, cmName, srcNS))).To(Succeed())
 
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -577,12 +577,12 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   k: v
 `, cmName, srcNS))).To(Succeed())
 
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -645,7 +645,7 @@ spec:
 			dstNS := "e2e-dst-" + id
 			projName := "p-srcterm-" + id
 			cmName := "payload-" + id
-			finalizer := "e2e.projection.be0x74a.io/hold-" + id
+			finalizer := "e2e.projection.sh/hold-" + id
 
 			createNamespaceWithHoldFinalizer(srcNS, finalizer)
 			createNamespace(dstNS)
@@ -662,12 +662,12 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   k: v
 `, cmName, srcNS))).To(Succeed())
 
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -714,7 +714,7 @@ spec:
 			dstNS := "e2e-dst-term-" + id
 			projName := "p-dstterm-" + id
 			cmName := "payload-" + id
-			finalizer := "e2e.projection.be0x74a.io/hold-" + id
+			finalizer := "e2e.projection.sh/hold-" + id
 
 			createNamespace(srcNS)
 			createNamespaceWithHoldFinalizer(dstNS, finalizer)
@@ -735,12 +735,12 @@ metadata:
   name: %s
   namespace: %s
   annotations:
-    projection.be0x74a.io/projectable: "true"
+    projection.sh/projectable: "true"
 data:
   k: v
 `, cmName, srcNS))).To(Succeed())
 
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s
@@ -792,7 +792,7 @@ spec:
 			})
 
 			By("creating a Projection referencing a Kind the RESTMapper can't resolve")
-			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.be0x74a.io/v1
+			Expect(kubectlApply(fmt.Sprintf(`apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: %s

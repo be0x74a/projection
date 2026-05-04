@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	benchGroup           = "bench.projection.be0x74a.io"
+	benchGroup           = "bench.projection.sh"
 	benchVersion         = "v1"
-	benchAnnotationStamp = "bench.projection.be0x74a.io/stamp"
+	benchAnnotationStamp = "bench.projection.sh/stamp"
 	srcNsPrefix          = "bench-src"
 	dstNsPrefix          = "bench-dst"
 )
@@ -71,7 +71,7 @@ func gvr(i int) schema.GroupVersionResource {
 	return schema.GroupVersionResource{Group: benchGroup, Version: benchVersion, Resource: benchPlural(i)}
 }
 
-// installCRDs installs N generic CRDs named bench.projection.be0x74a.io/v1
+// installCRDs installs N generic CRDs named bench.projection.sh/v1
 // BenchObjectN with a permissive schema. Idempotent.
 func installCRDs(ctx context.Context, c *clients, nGVKs int) error {
 	for i := 0; i < nGVKs; i++ {
@@ -144,7 +144,7 @@ func createSource(ctx context.Context, c *clients, gvkIdx int, srcNs, name strin
 	obj.SetNamespace(srcNs)
 	obj.SetName(name)
 	obj.SetAnnotations(map[string]string{
-		"projection.be0x74a.io/projectable": "true",
+		"projection.sh/projectable": "true",
 	})
 	obj.Object["spec"] = map[string]interface{}{"data": "seed"}
 	_, err := c.dynamic.Resource(gvr(gvkIdx)).Namespace(srcNs).Create(ctx, obj, metav1.CreateOptions{})
@@ -158,7 +158,7 @@ func createSource(ctx context.Context, c *clients, gvkIdx int, srcNs, name strin
 // single-namespace destination. projectionNs must already exist.
 func createProjection(ctx context.Context, c *clients, projectionNs, projName, srcNs, srcName, srcKind, dstNs string) error {
 	proj := &unstructured.Unstructured{}
-	proj.SetGroupVersionKind(schema.GroupVersionKind{Group: "projection.be0x74a.io", Version: "v1", Kind: "Projection"})
+	proj.SetGroupVersionKind(schema.GroupVersionKind{Group: "projection.sh", Version: "v1", Kind: "Projection"})
 	proj.SetNamespace(projectionNs)
 	proj.SetName(projName)
 	proj.Object["spec"] = map[string]interface{}{
@@ -174,7 +174,7 @@ func createProjection(ctx context.Context, c *clients, projectionNs, projName, s
 		},
 	}
 	_, err := c.dynamic.Resource(schema.GroupVersionResource{
-		Group: "projection.be0x74a.io", Version: "v1", Resource: "projections",
+		Group: "projection.sh", Version: "v1", Resource: "projections",
 	}).Namespace(projectionNs).Create(ctx, proj, metav1.CreateOptions{})
 	return err
 }
@@ -305,7 +305,7 @@ func ensureNamespaceWithLabel(ctx context.Context, c *clients, name, k, v string
 
 func createSelectorProjection(ctx context.Context, c *clients, projNs, projName, srcNs, srcName, srcKind string) error {
 	proj := &unstructured.Unstructured{}
-	proj.SetGroupVersionKind(schema.GroupVersionKind{Group: "projection.be0x74a.io", Version: "v1", Kind: "Projection"})
+	proj.SetGroupVersionKind(schema.GroupVersionKind{Group: "projection.sh", Version: "v1", Kind: "Projection"})
 	proj.SetNamespace(projNs)
 	proj.SetName(projName)
 	proj.Object["spec"] = map[string]interface{}{
@@ -323,7 +323,7 @@ func createSelectorProjection(ctx context.Context, c *clients, projNs, projName,
 		},
 	}
 	_, err := c.dynamic.Resource(schema.GroupVersionResource{
-		Group: "projection.be0x74a.io", Version: "v1", Resource: "projections",
+		Group: "projection.sh", Version: "v1", Resource: "projections",
 	}).Namespace(projNs).Create(ctx, proj, metav1.CreateOptions{})
 	return err
 }
