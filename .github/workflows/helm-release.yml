@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to package and publish (e.g. v0.2.0). Must already exist on origin.'
+        required: true
+        type: string
 
-# Top-level read-only; packages: write is granted only to the job that
-# actually pushes the chart (principle of least privilege).
+# Top-level read-only; write scopes are granted only to the job that needs
+# them (principle of least privilege). id-token: write is required for cosign
+# keyless OIDC chart signing.
 permissions:
   contents: read
 
@@ -17,9 +24,23 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+    env:
+      # Resolve TAG once: from inputs on workflow_dispatch, otherwise from the
+      # pushed tag's ref. Used by every downstream step.
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
+      - name: Validate tag format
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "::error::Invalid tag format: $TAG (expected vX.Y.Z or vX.Y.Z-suffix)"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Check for chart
         id: check
@@ -35,6 +56,10 @@ jobs:
         if: steps.check.outputs.has_chart == 'true'
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
 
+      - name: Install cosign
+        if: steps.check.outputs.has_chart == 'true'
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
       - name: Login to GitHub Container Registry
         if: steps.check.outputs.has_chart == 'true'
         run: |
@@ -45,14 +70,30 @@ jobs:
       - name: Package chart
         if: steps.check.outputs.has_chart == 'true'
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           helm package charts/projection \
             --version "${VERSION}" \
             --app-version "${VERSION}" \
             --destination dist-chart
 
       - name: Push chart to OCI registry
+        id: push
         if: steps.check.outputs.has_chart == 'true'
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          helm push "dist-chart/projection-${VERSION}.tgz" oci://ghcr.io/projection-operator/charts
+          VERSION="${TAG#v}"
+          OUTPUT=$(helm push "dist-chart/projection-${VERSION}.tgz" oci://ghcr.io/projection-operator/charts 2>&1)
+          echo "$OUTPUT"
+          DIGEST=$(echo "$OUTPUT" | grep -oE 'sha256:[a-f0-9]{64}' | head -1)
+          if [ -z "$DIGEST" ]; then
+            echo "::error::failed to capture chart digest from helm push output"
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Sign chart with cosign (keyless)
+        if: steps.check.outputs.has_chart == 'true'
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign sign --yes "ghcr.io/projection-operator/charts/projection@${DIGEST}"

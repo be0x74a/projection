@@ -222,7 +222,7 @@ cosign verify ghcr.io/projection-operator/projection:v0.2.0 \
 The Helm chart is published to `oci://ghcr.io/projection-operator/charts/projection` and signed with the same workflow:
 
 ```bash
-cosign verify oci://ghcr.io/projection-operator/charts/projection:0.2.0 \
+cosign verify ghcr.io/projection-operator/charts/projection:0.2.0 \
   --certificate-identity-regexp "https://github.com/projection-operator/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
