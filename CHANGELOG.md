@@ -16,7 +16,7 @@ This release re-publishes v0.2.0 under the project's neutral identity (zero adop
 - **API group:** `projection.be0x74a.io/v1` → `projection.sh/v1`. Annotation keys (`owned-by`, `projectable`, finalizer) and the `owned-by-uid` label move to the new prefix.
 - **Repo:** `github.com/be0x74a/projection` → `github.com/projection-operator/projection`. Old URL redirects for ~90 days.
 - **OCI artifacts:** `ghcr.io/be0x74a/projection` → `ghcr.io/projection-operator/projection`; chart at `ghcr.io/projection-operator/charts/projection`.
-- **Docs site:** `projection.be0x74a.io` → `projection.sh`. Old domain serves a redirect.
+- **Docs site:** `projection.be0x74a.io` → `docs.projection.sh`. Old domain serves a redirect.
 - **Removed:** `hack/migrate-to-v1.sh`, `docs/upgrade.md`, and `test/e2e-upgrade/` — defensive infrastructure for adopters that don't exist. Operators upgrading from any pre-1.0 deployment should perform a clean reinstall under the new identity.
 
 ### ⚠ BREAKING CHANGES
