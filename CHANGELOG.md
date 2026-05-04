@@ -7,11 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `resolveGVR` now fails fast with a clear message when a `Projection` points at a cluster-scoped Kind (e.g. `Namespace`, `ClusterRole`, `StorageClass`). Previously the dynamic client would issue a malformed URL and surface a confusing 404 as `SourceFetchFailed`; now the same case reports `SourceResolved=False` with message `<apiVersion>/<Kind> is cluster-scoped; projection only mirrors namespaced resources`.
-- Destination-side failures no longer double-emit the same Event (once inline per namespace, once again through the failure funnel). Keeps the `action` field populated on the surviving record instead of being stripped by client-go's event aggregation.
-- Unicode curly quotes in kubebuilder markers that prevented CRD installation on some apiserver versions.
+## [0.2.0] - 2026-05-04
 
 ### ⚠ BREAKING CHANGES
 
@@ -55,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Finalizer deletion path now scans every namespace to find owned destinations. Necessary for selector-based Projections whose destination set at deletion time may not match the original selector.
 - The controller now watches `Namespace` objects so selector-based Projections re-reconcile automatically when the matching set changes.
 - `Reconcile` no longer performs a separate pass to add the finalizer — finalizer-add and the first real reconcile happen in a single pass, halving the initial reconcile count per Projection.
+
+### Fixed
+
+- `resolveGVR` now fails fast with a clear message when a `Projection` points at a cluster-scoped Kind (e.g. `Namespace`, `ClusterRole`, `StorageClass`). Previously the dynamic client would issue a malformed URL and surface a confusing 404 as `SourceFetchFailed`; now the same case reports `SourceResolved=False` with message `<apiVersion>/<Kind> is cluster-scoped; projection only mirrors namespaced resources`.
+- Destination-side failures no longer double-emit the same Event (once inline per namespace, once again through the failure funnel). Keeps the `action` field populated on the surviving record instead of being stripped by client-go's event aggregation.
+- Unicode curly quotes in kubebuilder markers that prevented CRD installation on some apiserver versions.
 
 ## [0.1.0-alpha] - 2026-04-13
 
