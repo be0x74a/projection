@@ -137,7 +137,7 @@ func GetProjectDir() (string, error) {
 		return wd, err
 	}
 	// Walk up from cwd until we find a go.mod — the repo root. Robust across
-	// any test package location (test/e2e, test/e2e-upgrade, test/bench, etc.).
+	// any test package location (test/e2e, test/bench, etc.).
 	dir := wd
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {

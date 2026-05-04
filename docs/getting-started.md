@@ -2,8 +2,6 @@
 
 This walks through installing the `projection` operator and creating your first `Projection`.
 
-> **Upgrading from v0.1.0-alpha?** Read the [upgrade guide](upgrade.md) first. v0.2 changes three things that matter to existing installs: the default `sourceMode` flips from `permissive` to `allowlist` (sources need an opt-in annotation), Kubernetes Events now use `events.k8s.io/v1` instead of the legacy `core/v1` (alerting rules need updating), and `Projection.spec.destination` gains the mutually-exclusive `namespaceSelector` field. The migration script at `hack/migrate-to-v1.sh` handles the annotation rollout.
-
 ## Prerequisites
 
 - A Kubernetes cluster (1.32+ required — the CRD uses CEL admission validation, which needs this minimum version).

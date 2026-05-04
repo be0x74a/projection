@@ -76,10 +76,6 @@ test: manifests generate fmt vet envtest ## Run tests.
 test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
-.PHONY: test-e2e-upgrade  # Run the upgrade-path e2e tests. Expects an empty Kind cluster (no pre-installed operator).
-test-e2e-upgrade:
-	go test ./test/e2e-upgrade/ -v -ginkgo.v -timeout=10m
-
 PROFILE ?= small
 KUBECONFIG_BENCH ?= $(HOME)/.kube/bench.config
 

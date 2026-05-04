@@ -163,7 +163,6 @@ See [docs/concepts.md](docs/concepts.md) for the full picture, [docs/observabili
 - [Security model](docs/security.md)
 - [API stability](docs/api-stability.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [Upgrade guide](docs/upgrade.md)
 - [Scale and benchmarks](docs/scale.md)
 - [Limitations & roadmap](docs/limitations.md)
 
