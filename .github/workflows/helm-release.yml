@@ -60,12 +60,23 @@ jobs:
         if: steps.check.outputs.has_chart == 'true'
         uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
 
-      - name: Login to GitHub Container Registry
+      # Two logins: helm needs its own registry config to push, cosign reads
+      # ~/.docker/config.json which docker/login-action writes. Without the
+      # docker login, cosign sign fails uploading the signature blob.
+      - name: Login to GitHub Container Registry (helm)
         if: steps.check.outputs.has_chart == 'true'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
             --username "${{ github.actor }}" \
             --password-stdin
+
+      - name: Login to GitHub Container Registry (docker, for cosign)
+        if: steps.check.outputs.has_chart == 'true'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package chart
         if: steps.check.outputs.has_chart == 'true'
