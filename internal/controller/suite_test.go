@@ -34,7 +34,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	projectionv1 "github.com/be0x74a/projection/api/v1"
+	projectionv1 "github.com/projection-operator/projection/api/v1"
 	// +kubebuilder:scaffold:imports
 )
 

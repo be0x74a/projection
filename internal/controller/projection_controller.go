@@ -45,7 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	projectionv1 "github.com/be0x74a/projection/api/v1"
+	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
 const (

@@ -27,8 +27,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	projectionv1 "github.com/be0x74a/projection/api/v1"
-	"github.com/be0x74a/projection/internal/controller"
+	projectionv1 "github.com/projection-operator/projection/api/v1"
+	"github.com/projection-operator/projection/internal/controller"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"

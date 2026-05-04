@@ -21,7 +21,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/be0x74a/projection/test/utils"
+	"github.com/projection-operator/projection/test/utils"
 )
 
 const (

@@ -29,7 +29,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	projectionv1 "github.com/be0x74a/projection/api/v1"
+	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
 // widgetCRD is a two-version (v1alpha1 + v1, both served, conversion=None,

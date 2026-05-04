@@ -18,7 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
-	projectionv1 "github.com/be0x74a/projection/api/v1"
+	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
 // FuzzBuildDestination exercises the metadata-stripping, overlay-merge, and
