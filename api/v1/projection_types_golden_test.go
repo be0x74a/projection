@@ -40,7 +40,7 @@ var updateGolden = flag.Bool("update", false,
 // See docs/api-stability.md for the permanence commitment this test enforces.
 func TestCRDGolden(t *testing.T) {
 	const (
-		renderedPath = "../../config/crd/bases/projection.be0x74a.io_projections.yaml"
+		renderedPath = "../../config/crd/bases/projection.sh_projections.yaml"
 		goldenPath   = "testdata/crd.golden.yaml"
 	)
 
