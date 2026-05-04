@@ -55,4 +55,4 @@ jobs:
         if: steps.check.outputs.has_chart == 'true'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          helm push "dist-chart/projection-${VERSION}.tgz" oci://ghcr.io/be0x74a/charts
+          helm push "dist-chart/projection-${VERSION}.tgz" oci://ghcr.io/projection-operator/charts
