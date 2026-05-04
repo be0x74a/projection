@@ -65,17 +65,18 @@ sboms:
   - artifacts: archive
 
 # Sign each release archive with cosign keyless (OIDC-backed via GitHub
-# Actions). Produces {archive}.sig + {archive}.pem attached to the GitHub
-# Release — required for OpenSSF Scorecard's Signed-Releases check.
+# Actions). Cosign v3+ writes a single bundle file (signature + cert combined)
+# via --new-bundle-format, which is the default — the older --output-signature
+# / --output-certificate flags are silently ignored once that mode is on.
+# Producing {archive}.cosign.bundle satisfies OpenSSF Scorecard's
+# Signed-Releases check (verifiable via `cosign verify-blob --bundle`).
 signs:
   - cmd: cosign
-    signature: ${artifact}.sig
-    certificate: ${artifact}.pem
+    signature: ${artifact}.cosign.bundle
     args:
       - sign-blob
       - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
+      - --bundle=${signature}
       - ${artifact}
     artifacts: archive
     output: true
