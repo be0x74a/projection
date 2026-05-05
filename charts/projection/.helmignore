@@ -10,3 +10,6 @@
 *.tgz
 *.orig
 node_modules/
+# Pushed as a separate OCI artifact (tag :artifacthub.io) by the release
+# workflow; not installable chart content.
+artifacthub-repo.yml
