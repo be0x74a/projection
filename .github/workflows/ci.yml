@@ -199,3 +199,17 @@ jobs:
             echo "::error::Run 'make sync-chart-crds' locally and commit the result."
             exit 1
           fi
+
+  ci-gate:
+    name: CI gate
+    needs: [lint, test, build, e2e, chart-test, docs-ref, chart-crd-drift]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all needed jobs succeeded
+        run: |
+          echo '${{ toJSON(needs) }}'
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "::error::One or more required jobs failed or were cancelled"
+            exit 1
+          fi
