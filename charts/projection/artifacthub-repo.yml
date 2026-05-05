@@ -1,0 +1,13 @@
+# Artifact Hub repository metadata.
+#
+# This file is published as a separate OCI artifact (tag :artifacthub.io) on the
+# same registry namespace as the Helm chart by .github/workflows/helm-release.yml.
+# Artifact Hub fetches it to verify ownership of the OCI repository and to
+# associate this listing with the maintainer.
+#
+# `repositoryID` is intentionally absent in the initial publish: it is generated
+# by Artifact Hub when the repository is registered there. After registration,
+# add the UUID and re-tag a release to assert verified-publisher status.
+owners:
+  - name: projection maintainers
+    email: maintainers@projection.sh

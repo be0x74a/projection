@@ -60,6 +60,10 @@ jobs:
         if: steps.check.outputs.has_chart == 'true'
         uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
 
+      - name: Install oras
+        if: steps.check.outputs.has_chart == 'true'
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+
       # Two logins: helm needs its own registry config to push, cosign reads
       # ~/.docker/config.json which docker/login-action writes. Without the
       # docker login, cosign sign fails uploading the signature blob.
@@ -108,3 +112,15 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           cosign sign --yes "ghcr.io/projection-operator/charts/projection@${DIGEST}"
+
+      # Publish artifacthub-repo.yml as a separate OCI artifact under the
+      # special :artifacthub.io tag. Artifact Hub fetches this to verify
+      # ownership of the chart's OCI namespace and surface maintainer info.
+      # Idempotent: re-asserts the same metadata on every release.
+      - name: Push Artifact Hub repository metadata
+        if: steps.check.outputs.has_chart == 'true'
+        run: |
+          oras push \
+            ghcr.io/projection-operator/charts/projection:artifacthub.io \
+            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            charts/projection/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml

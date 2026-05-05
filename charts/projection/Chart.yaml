@@ -5,20 +5,76 @@ type: application
 version: 0.2.0
 appVersion: "0.2.0"
 kubeVersion: ">=1.32.0-0"
-home: https://github.com/projection-operator/projection
+home: https://docs.projection.sh
 sources:
   - https://github.com/projection-operator/projection
 maintainers:
   - name: be0x74a
+    email: maintainers@projection.sh
     url: https://github.com/be0x74a
 keywords:
   - kubernetes
   - operator
   - mirror
+  - reflector
   - configmap
   - secret
-  - reflector
+  - cross-namespace
+  - replication
+  - projection
 icon: https://raw.githubusercontent.com/projection-operator/projection/main/docs/assets/logo.svg
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/category: integration-delivery
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Basic Install
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/alternativeName: projection-operator
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://docs.projection.sh
+    - name: Source
+      url: https://github.com/projection-operator/projection
+    - name: Issues
+      url: https://github.com/projection-operator/projection/issues
+    - name: Changelog
+      url: https://github.com/projection-operator/projection/blob/main/CHANGELOG.md
+    - name: support
+      url: https://github.com/projection-operator/projection/issues
+  artifacthub.io/crds: |
+    - kind: Projection
+      version: v1
+      name: projections.projection.sh
+      displayName: Projection
+      description: Mirrors a single Kubernetes object from one namespace into one or more destination namespaces, with an optional label/annotation overlay.
+  artifacthub.io/crdsExamples: |
+    - apiVersion: projection.sh/v1
+      kind: Projection
+      metadata:
+        name: shared-ca-bundle
+      spec:
+        source:
+          apiVersion: v1
+          kind: ConfigMap
+          namespace: platform
+          name: ca-bundle
+        destination:
+          namespace: app
+          name: ca-bundle
+    - apiVersion: projection.sh/v1
+      kind: Projection
+      metadata:
+        name: shared-ca-bundle-fanout
+      spec:
+        source:
+          apiVersion: v1
+          kind: ConfigMap
+          namespace: platform
+          name: ca-bundle
+        destination:
+          namespaceSelector:
+            matchLabels:
+              projection.sh/receive-ca-bundle: "true"
+        overlay:
+          labels:
+            app.kubernetes.io/managed-by: projection
