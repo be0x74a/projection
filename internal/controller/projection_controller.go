@@ -36,13 +36,6 @@ import (
 	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
-// defaultSelectorWriteConcurrency is the default value for the
-// per-ClusterProjection in-flight destination-write cap during fan-out.
-// Retained on ProjectionReconciler for the moment so cmd/main.go's --
-// selector-write-concurrency wiring stays valid until the cluster
-// reconciler lands and takes ownership of the flag.
-const defaultSelectorWriteConcurrency = 16
-
 // ProjectionReconciler reconciles a (namespaced) Projection object. The
 // Projection mirrors a single source object into the Projection's own
 // namespace; cross-namespace fan-out lives on the cluster-scoped sibling
@@ -212,9 +205,6 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.RequeueInterval == 0 {
 		r.RequeueInterval = 30 * time.Second
-	}
-	if r.SelectorWriteConcurrency <= 0 {
-		r.SelectorWriteConcurrency = defaultSelectorWriteConcurrency
 	}
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, sourceIndex,
 		func(obj client.Object) []string {

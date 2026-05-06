@@ -257,10 +257,10 @@ func TestBuildDestination(t *testing.T) {
 			},
 		},
 		{
-			// The UID label is what cleanupStaleDestinations and
-			// deleteAllOwnedDestinations filter on; without it those paths
-			// fall back to an O(all namespaces) scan. Guard against
-			// accidental removal (#33).
+			// The UID label is what deleteAllOwnedDestinations (and the
+			// future ensureDestWatch on the cluster reconciler) filter on;
+			// without it those paths fall back to an O(all namespaces) scan.
+			// Guard against accidental removal (#33).
 			name: "ownership UID label stamped",
 			source: func() *unstructured.Unstructured {
 				return newSourceCM("src-cm", "src-ns")
