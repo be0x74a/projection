@@ -36,7 +36,7 @@ const (
 	// Helm uses the release name. Both label the pod control-plane=controller-manager.
 	operatorSelector = "control-plane=controller-manager"
 
-	ownedByAnnotation = "projection.sh/owned-by"
+	ownedByAnnotation = "projection.sh/owned-by-projection"
 
 	// runID is appended to every resource created by the suite so concurrent
 	// runs or leftover artifacts from earlier runs never collide.
@@ -136,7 +136,7 @@ var _ = Describe("Projection E2E", Ordered, func() {
 			id := nextID()
 			srcNS := "e2e-src-" + id
 			dstNS := "e2e-dst-" + id
-			projNS := srcNS
+			projNS := dstNS
 			projName := "p-cm-" + id
 			cmName := "payload-" + id
 
@@ -168,13 +168,12 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, projNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, projNS, cmName, srcNS))).To(Succeed())
 
 			By("waiting for destination ConfigMap to appear with matching data")
 			Eventually(func(g Gomega) {
@@ -245,13 +244,12 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: Service
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, svcName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, svcName, srcNS))).To(Succeed())
 
 			By("waiting for the destination Service to be created with a fresh clusterIP")
 			Eventually(func(g Gomega) {
@@ -265,7 +263,7 @@ spec:
 			By("verifying Ready=True")
 			Eventually(func() string {
 				return getJSONPath(`{.status.conditions[?(@.type=="Ready")].status}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 			}, defaultEventually, defaultTick).Should(Equal("True"))
 		})
 	})
@@ -317,22 +315,21 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, cmName, srcNS))).To(Succeed())
 
 			By("waiting for DestinationWritten=False with reason DestinationConflict")
 			Eventually(func(g Gomega) {
 				reason := getJSONPath(
 					`{.status.conditions[?(@.type=="DestinationWritten")].reason}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 				status := getJSONPath(
 					`{.status.conditions[?(@.type=="DestinationWritten")].status}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 				g.Expect(status).To(Equal("False"))
 				g.Expect(reason).To(Equal("DestinationConflict"))
 			}, defaultEventually, defaultTick).Should(Succeed())
@@ -350,7 +347,7 @@ spec:
 				return getJSONPath(
 					`{.items[*].reason}`,
 					"events",
-					"-n", srcNS,
+					"-n", dstNS,
 					"--field-selector",
 					fmt.Sprintf("involvedObject.name=%s,type=Warning", projName),
 				)
@@ -391,13 +388,12 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, cmName, srcNS))).To(Succeed())
 
 			By("waiting for initial projection")
 			Eventually(func() string {
@@ -452,13 +448,12 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, cmName, srcNS))).To(Succeed())
 
 			By("waiting for the destination to appear")
 			Eventually(func() string {
@@ -467,7 +462,7 @@ spec:
 
 			By("deleting the Projection")
 			_, err := utils.Run(exec.Command("kubectl", "delete", "projection", projName,
-				"-n", srcNS, "--wait=true", "--timeout=30s"))
+				"-n", dstNS, "--wait=true", "--timeout=30s"))
 			Expect(err).NotTo(HaveOccurred())
 
 			By("asserting the destination ConfigMap is gone")
@@ -482,7 +477,7 @@ spec:
 
 			By("asserting the Projection is fully gone (finalizer released)")
 			out, _ := utils.Run(exec.Command("kubectl", "get", "projection", projName,
-				"-n", srcNS, "--ignore-not-found=true", "-o", "name"))
+				"-n", dstNS, "--ignore-not-found=true", "-o", "name"))
 			Expect(strings.TrimSpace(string(out))).To(BeEmpty())
 		})
 
@@ -518,20 +513,19 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, cmName, srcNS))).To(Succeed())
 
 			By("waiting for the destination to be projected and annotated")
 			Eventually(func() string {
 				return getJSONPath(fmt.Sprintf("{.metadata.annotations.%s}",
 					strings.ReplaceAll(ownedByAnnotation, ".", `\.`)),
 					"cm", cmName, "-n", dstNS)
-			}, defaultEventually, defaultTick).Should(Equal(srcNS + "/" + projName))
+			}, defaultEventually, defaultTick).Should(Equal(dstNS + "/" + projName))
 
 			By("stripping the ownership annotation from the destination")
 			// JSON-patch with ~1 escape for the '/' in the annotation key.
@@ -544,7 +538,7 @@ spec:
 
 			By("deleting the Projection")
 			_, err = utils.Run(exec.Command("kubectl", "delete", "projection", projName,
-				"-n", srcNS, "--wait=true", "--timeout=30s"))
+				"-n", dstNS, "--wait=true", "--timeout=30s"))
 			Expect(err).NotTo(HaveOccurred())
 
 			By("asserting the destination survives (no ownership, no delete)")
@@ -589,13 +583,12 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, cmName, srcNS))).To(Succeed())
 
 			By("waiting for the destination to appear")
 			Eventually(func() string {
@@ -618,22 +611,22 @@ spec:
 			Eventually(func(g Gomega) {
 				reason := getJSONPath(
 					`{.status.conditions[?(@.type=="SourceResolved")].reason}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 				status := getJSONPath(
 					`{.status.conditions[?(@.type=="SourceResolved")].status}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 				g.Expect(status).To(Equal("False"))
 				g.Expect(reason).To(Equal("SourceDeleted"))
 			}, defaultEventually, defaultTick).Should(Succeed())
 
 			By("deleting the Projection — finalizer releases cleanly (no stuck finalizer)")
 			_, err = utils.Run(exec.Command("kubectl", "delete", "projection", projName,
-				"-n", srcNS, "--wait=true", "--timeout=30s"))
+				"-n", dstNS, "--wait=true", "--timeout=30s"))
 			Expect(err).NotTo(HaveOccurred())
 
 			By("the Projection is fully gone")
 			out, _ := utils.Run(exec.Command("kubectl", "get", "projection", projName,
-				"-n", srcNS, "--ignore-not-found=true", "-o", "name"))
+				"-n", dstNS, "--ignore-not-found=true", "-o", "name"))
 			Expect(strings.TrimSpace(string(out))).To(BeEmpty())
 		})
 	})
@@ -674,13 +667,12 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, cmName, srcNS))).To(Succeed())
 
 			By("waiting for the initial projection to succeed")
 			Eventually(func() string {
@@ -691,7 +683,7 @@ spec:
 			Eventually(func() string {
 				return getJSONPath(
 					`{.status.conditions[?(@.type=="Ready")].status}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 			}, defaultEventually, defaultTick).Should(Equal("True"))
 
 			By("deleting the source namespace — it will stick in Terminating due to the finalizer")
@@ -702,7 +694,7 @@ spec:
 			Consistently(func() string {
 				return getJSONPath(
 					`{.status.conditions[?(@.type=="Ready")].status}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 			}, 3*time.Second, 500*time.Millisecond).Should(Equal("True"))
 		})
 	})
@@ -747,22 +739,21 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: %s
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, cmName, srcNS, dstNS))).To(Succeed())
+`, projName, dstNS, cmName, srcNS))).To(Succeed())
 
 			By("Projection reports DestinationWritten=False reason=DestinationCreateFailed")
 			Eventually(func(g Gomega) {
 				status := getJSONPath(
 					`{.status.conditions[?(@.type=="DestinationWritten")].status}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 				reason := getJSONPath(
 					`{.status.conditions[?(@.type=="DestinationWritten")].reason}`,
-					"projection", projName, "-n", srcNS)
+					"projection", projName, "-n", dstNS)
 				g.Expect(status).To(Equal("False"))
 				g.Expect(reason).To(Equal("DestinationCreateFailed"))
 			}, defaultEventually, defaultTick).Should(Succeed())
@@ -770,7 +761,7 @@ spec:
 			By("no tight loop — we don't see hundreds of events for this Projection in a short window")
 			Consistently(func() int {
 				out, _ := utils.Run(exec.Command("kubectl", "get", "events",
-					"-n", srcNS,
+					"-n", dstNS,
 					"--field-selector", fmt.Sprintf("involvedObject.name=%s,type=Warning", projName),
 					"-o", "jsonpath={.items[*].reason}"))
 				return len(strings.Fields(string(out)))
@@ -799,13 +790,12 @@ metadata:
   namespace: %s
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigNap
     name: nonexistent
     namespace: %s
-  destination:
-    namespace: %s
-`, projName, srcNS, srcNS, srcNS))).To(Succeed())
+`, projName, srcNS, srcNS))).To(Succeed())
 
 			By("Projection reports SourceResolved=False reason=SourceResolutionFailed")
 			Eventually(func(g Gomega) {
