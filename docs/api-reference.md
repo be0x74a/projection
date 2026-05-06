@@ -9,59 +9,144 @@
 Package v1 contains API Schema definitions for the projection v1 API group
 
 ### Resource Types
+- [ClusterProjection](#clusterprojection)
+- [ClusterProjectionList](#clusterprojectionlist)
 - [Projection](#projection)
 - [ProjectionList](#projectionlist)
 
 
 
-#### DestinationRef
+#### ClusterProjection
 
 
 
-DestinationRef identifies where the projected object should be written.
-Invariant: namespace and namespaceSelector are mutually exclusive. Enforced
-at admission time by the CEL rule below (requires k8s 1.32+) and, as
-defense-in-depth, also by the reconciler.
+ClusterProjection mirrors one source object into many destination namespaces.
 
 
 
 _Appears in:_
-- [ProjectionSpec](#projectionspec)
+- [ClusterProjectionList](#clusterprojectionlist)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `namespace` _string_ | Namespace to project into. Defaults to the Projection's own namespace.<br />Mutually exclusive with NamespaceSelector. |  | MaxLength: 63 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Optional: \{\} <br /> |
-| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#labelselector-v1-meta)_ | NamespaceSelector selects namespaces to project into by label.<br />Mutually exclusive with Namespace. |  | Optional: \{\} <br /> |
-| `name` _string_ | Name in the destination namespace. Defaults to Source.Name. DNS-1123<br />subdomain: lowercase alphanumerics, '-', and '.', up to 253 chars. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Optional: \{\} <br /> |
+| `apiVersion` _string_ | `projection.sh/v1` | | |
+| `kind` _string_ | `ClusterProjection` | | |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  | Optional: \{\} <br /> |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  | Optional: \{\} <br /> |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[ClusterProjectionSpec](#clusterprojectionspec)_ |  |  |  |
+| `status` _[ClusterProjectionStatus](#clusterprojectionstatus)_ |  |  |  |
+
+
+#### ClusterProjectionDestination
+
+
+
+ClusterProjectionDestination is the cluster-scoped destination spec.
+
+`namespaces` and `namespaceSelector` are mutually exclusive (CEL admission)
+and at least one must be set.
+
+
+
+_Appears in:_
+- [ClusterProjectionSpec](#clusterprojectionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `namespaces` _string array_ | Namespaces is an explicit list of destination namespaces. Mutually<br />exclusive with NamespaceSelector. Each entry is a DNS-1123 label. |  | Optional: \{\} <br /> |
+| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#labelselector-v1-meta)_ | NamespaceSelector picks destination namespaces by label. Mutually<br />exclusive with Namespaces. |  | Optional: \{\} <br /> |
+| `name` _string_ | Name in each destination namespace. Defaults to Source.Name when empty.<br />The same Name is written into every targeted namespace. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$` <br />Optional: \{\} <br /> |
+
+
+#### ClusterProjectionList
+
+
+
+ClusterProjectionList contains a list of ClusterProjection.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `projection.sh/v1` | | |
+| `kind` _string_ | `ClusterProjectionList` | | |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  | Optional: \{\} <br /> |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  | Optional: \{\} <br /> |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `items` _[ClusterProjection](#clusterprojection) array_ |  |  |  |
+
+
+#### ClusterProjectionSpec
+
+
+
+ClusterProjectionSpec is the desired state of a cluster-scoped Projection.
+
+A ClusterProjection fans out one source object into many namespaces
+selected by either an explicit list or a label selector. Cluster-tier
+authority is required to create one — the chart does NOT aggregate the
+`clusterprojections` CRUD verbs into the built-in `admin`/`edit` roles.
+
+
+
+_Appears in:_
+- [ClusterProjection](#clusterprojection)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `source` _[SourceRef](#sourceref)_ | Source identifies the object to project. |  |  |
+| `destination` _[ClusterProjectionDestination](#clusterprojectiondestination)_ | Destination configures the fan-out target set and optional rename. |  |  |
+| `overlay` _[Overlay](#overlay)_ | Overlay applies metadata patches uniformly to every projected copy.<br />(Per-target overlays are not supported in v0.3.) |  | Optional: \{\} <br /> |
+
+
+#### ClusterProjectionStatus
+
+
+
+ClusterProjectionStatus reports the rollup of the most recent reconcile.
+
+
+
+_Appears in:_
+- [ClusterProjection](#clusterprojection)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#condition-v1-meta) array_ | Conditions: SourceResolved, DestinationWritten, Ready. |  | Optional: \{\} <br /> |
+| `destinationName` _string_ | DestinationName is the resolved name of the destination object,<br />identical across all targeted namespaces. Populated after the first<br />successful write; empty before that. |  | Optional: \{\} <br /> |
+| `namespacesWritten` _integer_ | NamespacesWritten is the count of namespaces in which the destination<br />was successfully created or updated during the most recent reconcile. |  | Optional: \{\} <br /> |
+| `namespacesFailed` _integer_ | NamespacesFailed is the count of namespaces where the write failed<br />during the most recent reconcile. The DestinationWritten condition's<br />message carries a (truncated) list of failed namespace names. |  | Optional: \{\} <br /> |
 
 
 #### Overlay
 
 
 
-Overlay is applied on top of the source object's metadata before writing
-to the destination. Overlay entries win on key conflicts with the source.
+Overlay applies metadata patches to the projected object on top of what the
+source carries. Only labels and annotations are mergeable — name and
+namespace cannot be touched (they are set by the controller from the
+destination spec).
 
 
 
 _Appears in:_
+- [ClusterProjectionSpec](#clusterprojectionspec)
 - [ProjectionSpec](#projectionspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `labels` _object (keys:string, values:string)_ | Labels are merged with the source object's metadata.labels before<br />writing to the destination. Keys set here win on conflict with<br />source labels. |  | Optional: \{\} <br /> |
-| `annotations` _object (keys:string, values:string)_ | Annotations are merged with the source object's metadata.annotations<br />before writing to the destination. Keys set here win on conflict<br />with source annotations. Note: the controller always overwrites<br />projection.sh/owned-by to its own bookkeeping value;<br />attempts to set it here are ignored. |  | Optional: \{\} <br /> |
+| `labels` _object (keys:string, values:string)_ | Labels merged onto the destination's metadata.labels. Source labels<br />win on conflict for keys the source already has; overlay wins for<br />overlay-only keys. (See concepts.md for the full merge rule.) |  | Optional: \{\} <br /> |
+| `annotations` _object (keys:string, values:string)_ | Annotations merged onto the destination's metadata.annotations.<br />Same merge rule as Labels. |  | Optional: \{\} <br /> |
 
 
 #### Projection
 
 
 
-Projection mirrors one Kubernetes object from a source location to one or
-more destination namespaces, declaratively and conflict-safely. Source
-edits propagate to destinations in ~100 ms via dynamic watches. Destinations
-carry a projection.sh/owned-by annotation the controller uses to
-refuse overwriting resources it did not create.
+Projection mirrors one source object into the Projection's own namespace.
 
 
 
@@ -77,6 +162,22 @@ _Appears in:_
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[ProjectionSpec](#projectionspec)_ |  |  |  |
 | `status` _[ProjectionStatus](#projectionstatus)_ |  |  |  |
+
+
+#### ProjectionDestination
+
+
+
+ProjectionDestination configures the rename override for a namespaced Projection.
+
+
+
+_Appears in:_
+- [ProjectionSpec](#projectionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name in the destination namespace. Defaults to Source.Name when empty. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$` <br />Optional: \{\} <br /> |
 
 
 #### ProjectionList
@@ -103,8 +204,12 @@ ProjectionList contains a list of Projection.
 
 
 
-ProjectionSpec specifies which source object to mirror, where to write it,
-and what metadata overlays to apply.
+ProjectionSpec is the desired state of a namespaced Projection.
+
+A Projection mirrors one source object into the Projection's own namespace.
+It cannot write outside its own namespace — that is what ClusterProjection
+is for. This narrowness is deliberate: it makes namespace-scoped RBAC on
+`projections.projection.sh` a structural confinement, not a policy hint.
 
 
 
@@ -113,8 +218,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `source` _[SourceRef](#sourceref)_ | Source is the object to project from. |  |  |
-| `destination` _[DestinationRef](#destinationref)_ | Destination controls where the projected object is written. |  | Optional: \{\} <br /> |
+| `source` _[SourceRef](#sourceref)_ | Source identifies the object to project. |  |  |
+| `destination` _[ProjectionDestination](#projectiondestination)_ | Destination optionally renames the destination. The destination<br />namespace is implicitly the Projection's own namespace and cannot<br />be set; for cross-namespace mirroring use ClusterProjection. |  | Optional: \{\} <br /> |
 | `overlay` _[Overlay](#overlay)_ | Overlay applies metadata patches on top of the projected object. |  | Optional: \{\} <br /> |
 
 
@@ -122,8 +227,7 @@ _Appears in:_
 
 
 
-ProjectionStatus reports the most recent reconcile outcome via three
-conditions: SourceResolved, DestinationWritten, and Ready.
+ProjectionStatus reports the most recent reconcile outcome.
 
 
 
@@ -132,25 +236,35 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#condition-v1-meta) array_ | Conditions reflect the current state of the projection. The controller<br />sets type "Ready" to True once the destination has been written, or<br />False with a reason describing why not. |  | Optional: \{\} <br /> |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#condition-v1-meta) array_ | Conditions: SourceResolved, DestinationWritten, Ready. |  | Optional: \{\} <br /> |
+| `destinationName` _string_ | DestinationName is the resolved name of the destination object after<br />applying any rename override (`spec.destination.name`) or defaulting to<br />`spec.source.name`. Populated by the controller after a successful<br />write; empty before the first reconcile completes. |  | Optional: \{\} <br /> |
 
 
 #### SourceRef
 
 
 
-SourceRef identifies the Kubernetes object to project from.
+SourceRef identifies the object to project.
+
+Group + Version + Kind name the GVK; Namespace + Name name the object.
+
+`version` may be omitted for non-core groups, in which case the operator
+resolves the preferred served version via the RESTMapper on every
+reconcile. The core group has only `v1` as a stable form, so `version`
+MUST be set when `group` is empty — enforced by the CEL rule below.
 
 
 
 _Appears in:_
+- [ClusterProjectionSpec](#clusterprojectionspec)
 - [ProjectionSpec](#projectionspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | APIVersion of the source object. Three forms accepted:<br />  - "v1"      — core group, pinned to v1.<br />  - "apps/v1" — named group, pinned to v1.<br />  - "apps/*"  — named group, RESTMapper-preferred served version.<br />The unpinned form follows the cluster: when a CRD author promotes<br />v1beta1→v1, projection picks up the new preferred version on the<br />next reconcile rather than reporting SourceResolutionFailed.<br />The "*" sentinel is invalid without a group prefix (no "*" form<br />for the core group, which has stable versions); enforced in the<br />reconciler since the regex is permissive for simplicity. |  | MinLength: 1 <br />Pattern: `^([a-z0-9.-]+/)?(v[0-9]+((alpha\|beta)[0-9]+)?\|\*)$` <br />Required: \{\} <br /> |
-| `kind` _string_ | Kind of the source object, e.g. "ConfigMap". |  | MinLength: 1 <br />Pattern: `^[A-Z][A-Za-z0-9]*$` <br />Required: \{\} <br /> |
-| `name` _string_ | Name of the source object. DNS-1123 subdomain: lowercase alphanumerics,<br />'-', and '.', up to 253 chars. Matches the permissive form Kubernetes<br />uses for most named objects (ConfigMap, Secret, Deployment, Pod, …). |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Required: \{\} <br /> |
-| `namespace` _string_ | Namespace of the source object. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `group` _string_ | Group is the API group of the source object. Empty string means the<br />core group (e.g. ConfigMap, Secret, Service). |  | Pattern: `^$\|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Optional: \{\} <br /> |
+| `version` _string_ | Version is the API version of the source object within its Group. Omit<br />for non-core groups to use the RESTMapper's preferred served version<br />(the source automatically follows CRD version promotions). |  | Pattern: `^$\|^v[0-9]+([a-z]+[0-9]+)?$` <br />Optional: \{\} <br /> |
+| `kind` _string_ | Kind is the API Kind of the source object (PascalCase). |  | Pattern: `^[A-Z][a-zA-Z0-9]*$` <br /> |
+| `namespace` _string_ | Namespace where the source object lives. |  | MaxLength: 63 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br /> |
+| `name` _string_ | Name of the source object. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$` <br /> |
 
 

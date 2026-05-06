@@ -4,17 +4,17 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: projections.projection.sh
+  name: clusterprojections.projection.sh
 spec:
   group: projection.sh
   names:
-    kind: Projection
-    listKind: ProjectionList
-    plural: projections
+    kind: ClusterProjection
+    listKind: ClusterProjectionList
+    plural: clusterprojections
     shortNames:
-    - proj
-    singular: projection
-  scope: Namespaced
+    - cproj
+    singular: clusterprojection
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.source.kind
@@ -33,6 +33,17 @@ spec:
     - jsonPath: .status.destinationName
       name: Destination
       type: string
+    - jsonPath: .status.namespacesWritten
+      name: Targets
+      type: integer
+    - jsonPath: .status.namespacesFailed
+      name: Failed
+      priority: 1
+      type: integer
+    - jsonPath: .spec.destination.namespaceSelector.matchLabels
+      name: Selector
+      priority: 1
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
@@ -42,8 +53,8 @@ spec:
     name: v1
     schema:
       openAPIV3Schema:
-        description: Projection mirrors one source object into the Projection's own
-          namespace.
+        description: ClusterProjection mirrors one source object into many destination
+          namespaces.
         properties:
           apiVersion:
             description: |-
@@ -64,29 +75,90 @@ spec:
             type: object
           spec:
             description: |-
-              ProjectionSpec is the desired state of a namespaced Projection.
+              ClusterProjectionSpec is the desired state of a cluster-scoped Projection.
 
-              A Projection mirrors one source object into the Projection's own namespace.
-              It cannot write outside its own namespace — that is what ClusterProjection
-              is for. This narrowness is deliberate: it makes namespace-scoped RBAC on
-              `projections.projection.sh` a structural confinement, not a policy hint.
+              A ClusterProjection fans out one source object into many namespaces
+              selected by either an explicit list or a label selector. Cluster-tier
+              authority is required to create one — the chart does NOT aggregate the
+              `clusterprojections` CRUD verbs into the built-in `admin`/`edit` roles.
             properties:
               destination:
-                description: |-
-                  Destination optionally renames the destination. The destination
-                  namespace is implicitly the Projection's own namespace and cannot
-                  be set; for cross-namespace mirroring use ClusterProjection.
+                description: Destination configures the fan-out target set and optional
+                  rename.
                 properties:
                   name:
-                    description: Name in the destination namespace. Defaults to Source.Name
-                      when empty.
+                    description: |-
+                      Name in each destination namespace. Defaults to Source.Name when empty.
+                      The same Name is written into every targeted namespace.
                     maxLength: 253
                     pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                     type: string
+                  namespaceSelector:
+                    description: |-
+                      NamespaceSelector picks destination namespaces by label. Mutually
+                      exclusive with Namespaces.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  namespaces:
+                    description: |-
+                      Namespaces is an explicit list of destination namespaces. Mutually
+                      exclusive with NamespaceSelector. Each entry is a DNS-1123 label.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
                 type: object
+                x-kubernetes-validations:
+                - message: namespaces and namespaceSelector are mutually exclusive
+                  rule: '!(has(self.namespaces) && has(self.namespaceSelector))'
+                - message: one of namespaces or namespaceSelector must be set
+                  rule: has(self.namespaces) || has(self.namespaceSelector)
               overlay:
-                description: Overlay applies metadata patches on top of the projected
-                  object.
+                description: |-
+                  Overlay applies metadata patches uniformly to every projected copy.
+                  (Per-target overlays are not supported in v0.3.)
                 properties:
                   annotations:
                     additionalProperties:
@@ -144,10 +216,12 @@ spec:
                     for core)
                   rule: self.group != '' || self.version != ''
             required:
+            - destination
             - source
             type: object
           status:
-            description: ProjectionStatus reports the most recent reconcile outcome.
+            description: ClusterProjectionStatus reports the rollup of the most recent
+              reconcile.
             properties:
               conditions:
                 description: 'Conditions: SourceResolved, DestinationWritten, Ready.'
@@ -208,11 +282,23 @@ spec:
                 type: array
               destinationName:
                 description: |-
-                  DestinationName is the resolved name of the destination object after
-                  applying any rename override (`spec.destination.name`) or defaulting to
-                  `spec.source.name`. Populated by the controller after a successful
-                  write; empty before the first reconcile completes.
+                  DestinationName is the resolved name of the destination object,
+                  identical across all targeted namespaces. Populated after the first
+                  successful write; empty before that.
                 type: string
+              namespacesFailed:
+                description: |-
+                  NamespacesFailed is the count of namespaces where the write failed
+                  during the most recent reconcile. The DestinationWritten condition's
+                  message carries a (truncated) list of failed namespace names.
+                format: int32
+                type: integer
+              namespacesWritten:
+                description: |-
+                  NamespacesWritten is the count of namespaces in which the destination
+                  was successfully created or updated during the most recent reconcile.
+                format: int32
+                type: integer
             type: object
         type: object
     served: true
