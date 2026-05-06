@@ -701,6 +701,14 @@ spec:
 
 	Context("Destination namespace terminating", func() {
 		It("surfaces DestinationWritten=False reason=DestinationCreateFailed without busy-looping", func() {
+			// Under the v0.3.0 namespaced contract, a Projection MUST live
+			// in its destination namespace — so a terminating destination
+			// rejects the Projection's own apply before the controller ever
+			// runs. This scenario is only expressible against
+			// ClusterProjection (Projection in one ns, destinations in
+			// many). Re-introduce in the cluster-reconciler PR.
+			Skip("not expressible against namespaced Projection in v0.3.0; moves to ClusterProjection in a follow-up PR")
+
 			id := nextID()
 			srcNS := "e2e-src-" + id
 			dstNS := "e2e-dst-term-" + id
