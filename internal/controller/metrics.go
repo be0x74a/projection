@@ -41,9 +41,9 @@ var reconcileTotal = prometheus.NewCounterVec(
 )
 
 // watchedGvks mirrors the size of ProjectionReconciler.watched. Incremented
-// on the insert branch of ensureWatch. Intentionally a Gauge (not a Counter)
-// because a future design may prune entries; keeping the type stable means
-// existing dashboards don't have to change if that happens.
+// on the insert branch of ensureSourceWatch. Intentionally a Gauge (not a
+// Counter) because a future design may prune entries; keeping the type stable
+// means existing dashboards don't have to change if that happens.
 var watchedGvks = prometheus.NewGauge(
 	prometheus.GaugeOpts{
 		Name: "projection_watched_gvks",
