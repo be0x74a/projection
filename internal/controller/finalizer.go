@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -32,24 +31,24 @@ const finalizerName = "projection.sh/finalizer"
 
 // handleDeletion runs the deletion path for a Projection whose
 // DeletionTimestamp has been set. Returns handled=true when the caller should
-// short-circuit Reconcile (regardless of whether the cleanup succeeded — the
-// apiserver tells us the Projection is going away). When handled=false, the
-// Projection is alive and the caller should continue with normal reconcile.
-func (d *ControllerDeps) handleDeletion(ctx context.Context, proj *projectionv1.Projection) (handled bool, result ctrl.Result, err error) {
+// short-circuit Reconcile. A non-nil err is propagated so controller-runtime
+// retries with backoff. When handled=false, the Projection is alive and the
+// caller should continue with normal reconcile.
+func (d *ControllerDeps) handleDeletion(ctx context.Context, proj *projectionv1.Projection) (handled bool, err error) {
 	if proj.DeletionTimestamp.IsZero() {
-		return false, ctrl.Result{}, nil
+		return false, nil
 	}
 	if controllerutil.ContainsFinalizer(proj, finalizerName) {
 		if err := d.deleteDestination(ctx, proj); err != nil {
 			log.FromContext(ctx).Error(err, "deleting destination")
-			return true, ctrl.Result{}, err
+			return true, err
 		}
 		controllerutil.RemoveFinalizer(proj, finalizerName)
 		if err := d.Update(ctx, proj); err != nil {
-			return true, ctrl.Result{}, err
+			return true, err
 		}
 	}
-	return true, ctrl.Result{}, nil
+	return true, nil
 }
 
 // ensureFinalizer adds the projection finalizer to proj if it's not already

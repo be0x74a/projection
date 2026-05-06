@@ -136,8 +136,8 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if handled, result, err := r.handleDeletion(ctx, proj); handled {
-		return result, err
+	if handled, err := r.handleDeletion(ctx, proj); handled {
+		return ctrl.Result{}, err
 	}
 
 	if err := r.ensureFinalizer(ctx, proj); err != nil {
