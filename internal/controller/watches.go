@@ -31,18 +31,12 @@ import (
 )
 
 // Field-indexer keys registered on Projection in SetupWithManager. mapSource
-// looks up Projections by sourceIndex; mapNamespace by selectorIndex.
+// looks up Projections by sourceIndex.
 const (
 	// sourceIndex is the field-indexer key we register on Projection so that
 	// a source-object event can be mapped to all Projections pointing at it
 	// via a single cached List(MatchingFields).
 	sourceIndex = "spec.sourceKey"
-
-	// selectorIndex is a synthetic field-indexer key for Projections that use
-	// a namespaceSelector. It lets mapNamespace efficiently find only
-	// selector-based Projections instead of listing all Projections.
-	selectorIndex      = "spec.hasNamespaceSelector"
-	selectorIndexValue = "true"
 )
 
 // ensureSourceWatch registers a dynamic watch on the given source GVK if one
@@ -77,34 +71,19 @@ func (r *ProjectionReconciler) ensureSourceWatch(gvk schema.GroupVersionKind) er
 }
 
 // mapSource translates a source-object event into reconcile.Requests for
-// every Projection that references it. The field indexer keyed on sourceKey
-// lets us do this with a single cached List.
+// every Projection that references it. The field indexer keyed on
+// sourceKey lets us do this with a single cached List.
 func (r *ProjectionReconciler) mapSource(ctx context.Context, obj client.Object) []reconcile.Request {
 	gvk := obj.GetObjectKind().GroupVersionKind()
-	key := sourceKey(gvk.Group, gvk.Kind, obj.GetNamespace(), obj.GetName())
+	key := sourceKey(projectionv1.SourceRef{
+		Group:     gvk.Group,
+		Kind:      gvk.Kind,
+		Namespace: obj.GetNamespace(),
+		Name:      obj.GetName(),
+	})
 	var list projectionv1.ProjectionList
 	if err := r.List(ctx, &list, client.MatchingFields{sourceIndex: key}); err != nil {
 		log.FromContext(ctx).Error(err, "listing projections by source index", "key", key)
-		return nil
-	}
-	reqs := make([]reconcile.Request, 0, len(list.Items))
-	for i := range list.Items {
-		p := &list.Items[i]
-		reqs = append(reqs, reconcile.Request{
-			NamespacedName: client.ObjectKey{Namespace: p.Namespace, Name: p.Name},
-		})
-	}
-	return reqs
-}
-
-// mapNamespace maps a Namespace event to reconcile requests for all
-// Projections that use a namespaceSelector. When a namespace is
-// created/updated/deleted, the matching set for selector-based Projections
-// may have changed.
-func (r *ProjectionReconciler) mapNamespace(ctx context.Context, _ client.Object) []reconcile.Request {
-	var list projectionv1.ProjectionList
-	if err := r.List(ctx, &list, client.MatchingFields{selectorIndex: selectorIndexValue}); err != nil {
-		log.FromContext(ctx).Error(err, "listing selector-based projections for namespace event")
 		return nil
 	}
 	reqs := make([]reconcile.Request, 0, len(list.Items))
