@@ -33,7 +33,7 @@ func newSourceCM(name, namespace string) *unstructured.Unstructured {
 }
 
 // newProj builds a Projection with the given metadata and spec bits.
-func newProj(projNs, projName string, src projectionv1.SourceRef, dst projectionv1.DestinationRef, overlay projectionv1.Overlay) *projectionv1.Projection {
+func newProj(projNs, projName string, src projectionv1.SourceRef, dst projectionv1.ProjectionDestination, overlay projectionv1.Overlay) *projectionv1.Projection {
 	return &projectionv1.Projection{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      projName,
@@ -55,10 +55,11 @@ func TestBuildDestination(t *testing.T) {
 	type checkFn func(t *testing.T, dst *unstructured.Unstructured)
 
 	baseSrc := projectionv1.SourceRef{
-		APIVersion: "v1",
-		Kind:       "ConfigMap",
-		Name:       "src-cm",
-		Namespace:  "src-ns",
+		Group:     "",
+		Version:   "v1",
+		Kind:      "ConfigMap",
+		Name:      "src-cm",
+		Namespace: "src-ns",
 	}
 
 	tests := []struct {
@@ -81,7 +82,7 @@ func TestBuildDestination(t *testing.T) {
 				u.SetFinalizers([]string{"example.com/finalizer"})
 				return u
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				if got := dst.GetResourceVersion(); got != "" {
 					t.Errorf("resourceVersion = %q, want empty", got)
@@ -125,7 +126,7 @@ func TestBuildDestination(t *testing.T) {
 				}
 				return u
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				if _, exists := dst.Object["status"]; exists {
 					t.Errorf("destination still has .status: %v", dst.Object["status"])
@@ -143,7 +144,7 @@ func TestBuildDestination(t *testing.T) {
 				u.SetAnnotations(map[string]string{"user-annotation": "keep"})
 				return u
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				data, ok := dst.Object["data"].(map[string]interface{})
 				if !ok {
@@ -170,7 +171,7 @@ func TestBuildDestination(t *testing.T) {
 				})
 				return u
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				ann := dst.GetAnnotations()
 				if _, exists := ann["kubectl.kubernetes.io/last-applied-configuration"]; exists {
@@ -189,7 +190,7 @@ func TestBuildDestination(t *testing.T) {
 				u.SetAnnotations(map[string]string{"a": "source", "untouched": "yes"})
 				return u
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{
 				Labels:      map[string]string{"a": "overlay", "b": "new"},
 				Annotations: map[string]string{"a": "overlay", "b": "new"},
 			}),
@@ -220,7 +221,7 @@ func TestBuildDestination(t *testing.T) {
 			source: func() *unstructured.Unstructured {
 				return newSourceCM("src-cm", "src-ns")
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{
 				Labels:      map[string]string{"only": "overlay"},
 				Annotations: map[string]string{"only": "overlay"},
 			}),
@@ -246,7 +247,7 @@ func TestBuildDestination(t *testing.T) {
 			source: func() *unstructured.Unstructured {
 				return newSourceCM("src-cm", "src-ns")
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				got := dst.GetAnnotations()[ownedByAnnotation]
 				want := "proj-ns/proj-name"
@@ -256,15 +257,15 @@ func TestBuildDestination(t *testing.T) {
 			},
 		},
 		{
-			// The UID label is what cleanupStaleDestinations and
-			// deleteAllOwnedDestinations filter on; without it those paths
-			// fall back to an O(all namespaces) scan. Guard against
-			// accidental removal (#33).
+			// The UID label is what deleteAllOwnedDestinations (and the
+			// future ensureDestWatch on the cluster reconciler) filter on;
+			// without it those paths fall back to an O(all namespaces) scan.
+			// Guard against accidental removal (#33).
 			name: "ownership UID label stamped",
 			source: func() *unstructured.Unstructured {
 				return newSourceCM("src-cm", "src-ns")
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				got := dst.GetLabels()[ownedByUIDLabel]
 				want := "00000000-0000-0000-0000-000000000001"
@@ -278,7 +279,7 @@ func TestBuildDestination(t *testing.T) {
 			source: func() *unstructured.Unstructured {
 				return newSourceCM("src-cm", "src-ns")
 			},
-			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+			proj: newProj("proj-ns", "proj-name", baseSrc, projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				if got, want := dst.GetNamespace(), "proj-ns"; got != want {
 					t.Errorf("namespace = %q, want %q", got, want)
@@ -312,8 +313,8 @@ func TestBuildDestination(t *testing.T) {
 				return u
 			},
 			proj: newProj("proj-ns", "proj-name",
-				projectionv1.SourceRef{APIVersion: "v1", Kind: "Service", Name: "src-svc", Namespace: "src-ns"},
-				projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+				projectionv1.SourceRef{Version: "v1", Kind: "Service", Name: "src-svc", Namespace: "src-ns"},
+				projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				for _, path := range [][]string{
 					{"spec", "clusterIP"},
@@ -359,8 +360,8 @@ func TestBuildDestination(t *testing.T) {
 				return u
 			},
 			proj: newProj("proj-ns", "proj-name",
-				projectionv1.SourceRef{APIVersion: "v1", Kind: "PersistentVolumeClaim", Name: "src-pvc", Namespace: "src-ns"},
-				projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+				projectionv1.SourceRef{Version: "v1", Kind: "PersistentVolumeClaim", Name: "src-pvc", Namespace: "src-ns"},
+				projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				if _, found, _ := unstructured.NestedFieldNoCopy(dst.Object, "spec", "volumeName"); found {
 					t.Error("expected spec.volumeName to be stripped")
@@ -402,8 +403,8 @@ func TestBuildDestination(t *testing.T) {
 				return u
 			},
 			proj: newProj("proj-ns", "proj-name",
-				projectionv1.SourceRef{APIVersion: "v1", Kind: "Pod", Name: "src-pod", Namespace: "src-ns"},
-				projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+				projectionv1.SourceRef{Version: "v1", Kind: "Pod", Name: "src-pod", Namespace: "src-ns"},
+				projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				if _, found, _ := unstructured.NestedFieldNoCopy(dst.Object, "spec", "nodeName"); found {
 					t.Error("expected spec.nodeName to be stripped")
@@ -455,8 +456,8 @@ func TestBuildDestination(t *testing.T) {
 				return u
 			},
 			proj: newProj("proj-ns", "proj-name",
-				projectionv1.SourceRef{APIVersion: "batch/v1", Kind: "Job", Name: "src-job", Namespace: "src-ns"},
-				projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+				projectionv1.SourceRef{Group: "batch", Version: "v1", Kind: "Job", Name: "src-job", Namespace: "src-ns"},
+				projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				// spec.selector must be stripped so the destination apiserver regenerates it.
 				if _, found, _ := unstructured.NestedFieldNoCopy(dst.Object, "spec", "selector"); found {
@@ -506,8 +507,8 @@ func TestBuildDestination(t *testing.T) {
 				return u
 			},
 			proj: newProj("proj-ns", "proj-name",
-				projectionv1.SourceRef{APIVersion: "apps/v1", Kind: "Deployment", Name: "src-dep", Namespace: "src-ns"},
-				projectionv1.DestinationRef{}, projectionv1.Overlay{}),
+				projectionv1.SourceRef{Group: "apps", Version: "v1", Kind: "Deployment", Name: "src-dep", Namespace: "src-ns"},
+				projectionv1.ProjectionDestination{}, projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
 				replicas, found, _ := unstructured.NestedInt64(dst.Object, "spec", "replicas")
 				if !found {
@@ -522,15 +523,18 @@ func TestBuildDestination(t *testing.T) {
 			},
 		},
 		{
-			name: "explicit destination override",
+			name: "explicit destination name override",
 			source: func() *unstructured.Unstructured {
 				return newSourceCM("src-cm", "src-ns")
 			},
+			// Destination namespace is always the Projection's own namespace
+			// for v0.3 (cross-namespace mirroring lives on ClusterProjection);
+			// the rename override only touches the destination name.
 			proj: newProj("proj-ns", "proj-name", baseSrc,
-				projectionv1.DestinationRef{Namespace: "other-ns", Name: "other-name"},
+				projectionv1.ProjectionDestination{Name: "other-name"},
 				projectionv1.Overlay{}),
 			asserts: func(t *testing.T, dst *unstructured.Unstructured) {
-				if got, want := dst.GetNamespace(), "other-ns"; got != want {
+				if got, want := dst.GetNamespace(), "proj-ns"; got != want {
 					t.Errorf("namespace = %q, want %q", got, want)
 				}
 				if got, want := dst.GetName(), "other-name"; got != want {

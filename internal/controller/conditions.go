@@ -23,7 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	projectionv1 "github.com/projection-operator/projection/api/v1"
@@ -37,19 +36,17 @@ const (
 )
 
 // resolvedVersionMessage produces the human-readable SourceResolved
-// condition message when a Projection used the unpinned form (apps/*) and
-// the RESTMapper picked a concrete version. Returns "" for pinned sources
-// to preserve today's empty-message behavior.
+// condition message when a Projection used the unpinned form (omitting
+// source.version) and the RESTMapper picked a concrete version. Returns
+// "" for pinned sources to preserve today's empty-message behavior.
 func resolvedVersionMessage(src projectionv1.SourceRef, resolvedVersion string) string {
-	gv, err := schema.ParseGroupVersion(src.APIVersion)
 	// resolvedVersion == "" means failDestination was called before
-	// resolveGVR ran (e.g. from the InvalidSpec mutex-violation path);
-	// there's no version to report yet.
-	if err != nil || gv.Version != "*" || resolvedVersion == "" {
+	// resolveGVR ran; there's no version to report yet.
+	if src.Version != "" || resolvedVersion == "" {
 		return ""
 	}
 	return fmt.Sprintf("resolved %s/%s to preferred version %s",
-		gv.Group, src.Kind, resolvedVersion)
+		src.Group, src.Kind, resolvedVersion)
 }
 
 // setCondition mutates proj.Status.Conditions locally (no API call) so callers
@@ -81,14 +78,14 @@ func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv
 	return ctrl.Result{RequeueAfter: r.RequeueInterval}, nil
 }
 
-// failDestination records a failure that happened during the write stage. By
-// the time we get here we've already fetched the source, so SourceResolved is
-// True; DestinationWritten flips to False. Ready mirrors the destination-side
-// reason. Callers are responsible for emitting the event — failDestination
-// only touches status, conditions, and metrics. This keeps the rollup path
-// (which has already fired per-namespace events in the fan-out loop) from
-// double-emitting, which the client-go events broadcaster would otherwise
-// aggregate into a record that drops the action field.
+// failDestination records a failure that happened during the write
+// stage. By the time we get here we've already fetched the source, so
+// SourceResolved is True; DestinationWritten flips to False. Ready
+// mirrors the destination-side reason. Callers are responsible for
+// emitting the event — failDestination only touches status, conditions,
+// and metrics. Avoiding a second emit here keeps the client-go events
+// broadcaster from aggregating two records into one that drops the
+// action field.
 func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projectionv1.Projection, resolvedVersion, reason, msg string) (ctrl.Result, error) {
 	srMsg := resolvedVersionMessage(proj.Spec.Source, resolvedVersion)
 	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", srMsg)
@@ -106,12 +103,17 @@ func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projec
 	return ctrl.Result{RequeueAfter: r.RequeueInterval}, nil
 }
 
-// markAllReady flips all three conditions to True in a single status update.
+// markAllReady flips all three conditions to True and stamps the resolved
+// destination name on status in a single update. The destination name
+// surfaces on the printcolumn so kubectl get displays it without the
+// caller having to chase the source ref.
 func (r *ProjectionReconciler) markAllReady(ctx context.Context, proj *projectionv1.Projection, resolvedVersion string) error {
 	msg := resolvedVersionMessage(proj.Spec.Source, resolvedVersion)
 	setCondition(proj, conditionSourceResolved, metav1.ConditionTrue, "Resolved", msg)
 	setCondition(proj, conditionDestinationWritten, metav1.ConditionTrue, "Projected", "")
 	setCondition(proj, conditionReady, metav1.ConditionTrue, "Projected", "")
+	_, destName := destinationCoords(proj)
+	proj.Status.DestinationName = destName
 	if err := r.Status().Update(ctx, proj); err != nil {
 		return err
 	}

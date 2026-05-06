@@ -25,7 +25,7 @@ package v1
 // reconcile. The core group has only `v1` as a stable form, so `version`
 // MUST be set when `group` is empty — enforced by the CEL rule below.
 //
-// +kubebuilder:validation:XValidation:rule="self.group != '' || self.version != ''",message="version is required when group is empty (no unpinned form for core)"
+// +kubebuilder:validation:XValidation:rule="size(self.group) != 0 || size(self.version) != 0",message="version is required when group is empty (no unpinned form for core)"
 type SourceRef struct {
 	// Group is the API group of the source object. Empty string means the
 	// core group (e.g. ConfigMap, Secret, Service).

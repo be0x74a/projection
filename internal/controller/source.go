@@ -51,43 +51,43 @@ const (
 	SourceModeAllowlist SourceMode = "allowlist"
 )
 
-// sourceKey is the canonical string key identifying a source object across
-// both the field indexer and the event-mapping function. The version is
-// intentionally omitted: source events always carry a resolved GVK, but a
-// Projection may reference its source via an unpinned form (e.g. apps/*).
-// Joining on (group, kind, namespace, name) keeps both sides in agreement
-// regardless of which served version the apiserver delivered the event for.
-func sourceKey(group, kind, namespace, name string) string {
-	return group + "/" + kind + "/" + namespace + "/" + name
+// sourceKey is the canonical string key identifying a source object
+// across both the field indexer and the event-mapping function. The
+// version is intentionally omitted: source events always carry a
+// resolved GVK, but a Projection may reference its source via an
+// unpinned form (no version pin, RESTMapper picks the preferred served
+// version). Joining on (group, kind, namespace, name) keeps both sides
+// in agreement regardless of which served version the apiserver
+// delivered the event for.
+func sourceKey(s projectionv1.SourceRef) string {
+	return fmt.Sprintf("%s/%s/%s/%s", s.Group, s.Kind, s.Namespace, s.Name)
 }
 
-// resolveGVR maps a SourceRef's apiVersion+kind to a concrete GVR via the
+// resolveGVR maps a SourceRef's group+version+kind to a concrete GVR via the
 // cached RESTMapper. The second return value is the version the RESTMapper
-// picked — equal to gv.Version when the user pinned a version, or the
-// preferred served version when unpinned (gv.Version == "*"). Callers
+// picked — equal to src.Version when the user pinned a version, or the
+// preferred served version when unpinned (src.Version == ""). Callers
 // surface the resolved version in the SourceResolved condition message
 // for operator-visibility.
+//
+// SourceRef admission rejects an empty Version when Group is empty (no
+// unpinned form for the core group), so we don't repeat that check here.
 func (d *ControllerDeps) resolveGVR(src projectionv1.SourceRef) (schema.GroupVersionResource, string, error) {
-	gv, err := schema.ParseGroupVersion(src.APIVersion)
-	if err != nil {
-		return schema.GroupVersionResource{}, "", fmt.Errorf("parsing apiVersion %q: %w", src.APIVersion, err)
-	}
-	gk := schema.GroupKind{Group: gv.Group, Kind: src.Kind}
+	gk := schema.GroupKind{Group: src.Group, Kind: src.Kind}
 
-	var mapping *apimeta.RESTMapping
-	switch {
-	case gv.Version == "*" && gv.Group == "":
-		return schema.GroupVersionResource{}, "", fmt.Errorf(
-			"apiVersion %q: group is required when version is unpinned", src.APIVersion)
-	case gv.Version == "*":
+	var (
+		mapping *apimeta.RESTMapping
+		err     error
+	)
+	if src.Version == "" {
 		// Unpinned: RESTMapper picks the preferred served version.
 		mapping, err = d.RESTMapper.RESTMapping(gk)
-	default:
-		// Pinned to a specific version (today's behavior).
-		mapping, err = d.RESTMapper.RESTMapping(gk, gv.Version)
+	} else {
+		// Pinned to a specific version.
+		mapping, err = d.RESTMapper.RESTMapping(gk, src.Version)
 	}
 	if err != nil {
-		return schema.GroupVersionResource{}, "", fmt.Errorf("resolving %s/%s: %w", src.APIVersion, src.Kind, err)
+		return schema.GroupVersionResource{}, "", fmt.Errorf("resolving %s/%s: %w", formatGV(src), src.Kind, err)
 	}
 	// Projection only mirrors namespaced resources. Cluster-scoped Kinds
 	// (Namespace, ClusterRole, StorageClass, CRDs, PriorityClass, ...)
@@ -99,21 +99,36 @@ func (d *ControllerDeps) resolveGVR(src projectionv1.SourceRef) (schema.GroupVer
 	if mapping.Scope.Name() != apimeta.RESTScopeNameNamespace {
 		return schema.GroupVersionResource{}, "", fmt.Errorf(
 			"%s/%s is cluster-scoped; projection only mirrors namespaced resources",
-			src.APIVersion, src.Kind)
+			formatGV(src), src.Kind)
 	}
 	return mapping.Resource, mapping.GroupVersionKind.Version, nil
 }
 
-// handleSourceFetchError funnels errors from the source-object Get call. A
-// 404 is a distinct signal ("source has been deleted"): we clean up every
-// owned destination (single or selector-based fan-out) and surface
-// SourceResolved=False reason=SourceDeleted via failSource, which emits a
-// single Warning SourceDeleted event (matches the SourceOptedOut /
-// SourceNotProjectable opt-out precedent). Cleanup errors are logged but do
-// not block the status update — same opt-out cleanup pattern used when a
-// source stops being projectable. All other errors (transient connectivity,
-// RBAC blips, 5xx) keep the SourceFetchFailed behavior and leave
-// destinations in place.
+// formatGV renders a SourceRef's group+version as the Kubernetes
+// canonical apiVersion string for use in error messages and condition
+// text. Empty group becomes the bare version (e.g. "v1"); a present
+// group joins with "/". When version is unpinned, "*" stands in.
+func formatGV(src projectionv1.SourceRef) string {
+	v := src.Version
+	if v == "" {
+		v = "*"
+	}
+	if src.Group == "" {
+		return v
+	}
+	return src.Group + "/" + v
+}
+
+// handleSourceFetchError funnels errors from the source-object Get call.
+// A 404 is a distinct signal ("source has been deleted"): we clean up
+// every owned destination and surface SourceResolved=False
+// reason=SourceDeleted via failSource, which emits a single Warning
+// SourceDeleted event (matches the SourceOptedOut / SourceNotProjectable
+// opt-out precedent). Cleanup errors are logged but do not block the
+// status update — same opt-out cleanup pattern used when a source stops
+// being projectable. All other errors (transient connectivity, RBAC
+// blips, 5xx) keep the SourceFetchFailed behavior and leave destinations
+// in place.
 func (r *ProjectionReconciler) handleSourceFetchError(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, err error) (ctrl.Result, error) {
 	if !apierrors.IsNotFound(err) {
 		return r.failSource(ctx, proj, "SourceFetchFailed", "Get", err.Error())

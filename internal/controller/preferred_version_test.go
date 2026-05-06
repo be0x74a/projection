@@ -90,7 +90,6 @@ var _ = Describe("Preferred-version resolution against a multi-version CRD", fun
 	var (
 		r       *ProjectionReconciler
 		crd     *apiextensionsv1.CustomResourceDefinition
-		srcNS   string
 		dstNS   string
 		projKey types.NamespacedName
 	)
@@ -117,9 +116,7 @@ var _ = Describe("Preferred-version resolution against a multi-version CRD", fun
 
 		r = newReconciler()
 
-		srcNS = uniqueNS("widget-src")
 		dstNS = uniqueNS("widget-dst")
-		ensureNamespace(srcNS)
 		ensureNamespace(dstNS)
 	})
 
@@ -130,44 +127,46 @@ var _ = Describe("Preferred-version resolution against a multi-version CRD", fun
 		_ = k8sClient.Delete(ctx, crd.DeepCopy())
 	})
 
-	It("picks the storage version (v1) when source.apiVersion is example.com/*", func() {
+	It("picks the storage version (v1) when source omits version", func() {
 		// Create a Widget instance via v1.
 		widget := &unstructured.Unstructured{}
 		widget.SetGroupVersionKind(schema.GroupVersionKind{
 			Group: "example.com", Version: "v1", Kind: "Widget",
 		})
 		widget.SetName("widget-src")
-		widget.SetNamespace(srcNS)
+		widget.SetNamespace(dstNS)
 		widget.SetAnnotations(map[string]string{projectableAnnotation: "true"})
 		widget.Object["spec"] = map[string]interface{}{"data": "hello"}
 		Expect(k8sClient.Create(ctx, widget)).To(Succeed())
 
-		// Projection with unpinned apiVersion — the RESTMapper should
-		// resolve example.com/* to the preferred (storage) version v1.
-		projKey = types.NamespacedName{Name: "widget-proj", Namespace: srcNS}
+		// Projection with unpinned source.version — the RESTMapper should
+		// resolve example.com/Widget to the preferred (storage) version v1.
+		// Destination namespace is the Projection's own namespace (dstNS),
+		// so the source must live there too for the v0.3 namespaced shape.
+		projKey = types.NamespacedName{Name: "widget-proj", Namespace: dstNS}
 		proj := &projectionv1.Projection{
 			ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
 			Spec: projectionv1.ProjectionSpec{
 				Source: projectionv1.SourceRef{
-					APIVersion: "example.com/*",
-					Kind:       "Widget",
-					Name:       "widget-src",
-					Namespace:  srcNS,
+					Group:     "example.com",
+					Kind:      "Widget",
+					Name:      "widget-src",
+					Namespace: dstNS,
 				},
-				Destination: projectionv1.DestinationRef{Namespace: dstNS},
+				Destination: projectionv1.ProjectionDestination{Name: "widget-dst"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
 
 		reconcileOnce(r, projKey)
 
-		// Destination exists in the dst namespace.
+		// Destination exists alongside the source under the rename name.
 		dst := &unstructured.Unstructured{}
 		dst.SetGroupVersionKind(schema.GroupVersionKind{
 			Group: "example.com", Version: "v1", Kind: "Widget",
 		})
 		Expect(k8sClient.Get(ctx,
-			types.NamespacedName{Name: "widget-src", Namespace: dstNS},
+			types.NamespacedName{Name: "widget-dst", Namespace: dstNS},
 			dst)).To(Succeed())
 		Expect(dst.GetAnnotations()).To(HaveKeyWithValue(
 			ownedByAnnotation, projKey.Namespace+"/"+projKey.Name))

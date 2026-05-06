@@ -20,11 +20,9 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -33,19 +31,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
-// defaultSelectorWriteConcurrency is the default value for the
-// per-Projection in-flight destination-write cap during selector-based
-// fan-out. See ProjectionReconciler.SelectorWriteConcurrency for the
-// runtime override and the rationale for the cap itself.
-const defaultSelectorWriteConcurrency = 16
-
-// ProjectionReconciler reconciles a Projection object.
+// ProjectionReconciler reconciles a (namespaced) Projection object. The
+// Projection mirrors a single source object into the Projection's own
+// namespace; cross-namespace fan-out lives on the cluster-scoped sibling
+// (ClusterProjection) and its dedicated reconciler.
 type ProjectionReconciler struct {
 	// ControllerDeps bundles the apiserver-facing dependencies shared with
 	// the future ClusterProjectionReconciler (Client, Scheme, DynamicClient,
@@ -66,19 +60,12 @@ type ProjectionReconciler struct {
 	// don't need to set it explicitly).
 	RequeueInterval time.Duration
 
-	// SelectorWriteConcurrency bounds the number of in-flight destination
-	// writes during selector-based fan-out. Each worker issues a Get plus
-	// (optionally) a Create or Update against the apiserver; HTTP/2
-	// multiplexing in client-go lets many of these share a single
-	// connection, but we cap the parallelism so a Projection matching
-	// thousands of namespaces can't DoS the apiserver or blow out
-	// controller memory with goroutines. Configured via the
-	// --selector-write-concurrency CLI flag (Helm value
-	// selectorWriteConcurrency). Defaults to defaultSelectorWriteConcurrency
-	// when unset; SetupWithManager fills the zero value so unit-test
-	// constructions don't need to set it explicitly, and the fan-out site
-	// guards the same default so direct-Reconcile unit tests that bypass
-	// SetupWithManager don't deadlock on a zero-capacity semaphore.
+	// SelectorWriteConcurrency is reserved for the cluster-scoped sibling
+	// (ClusterProjectionReconciler) and currently unused by this
+	// reconciler — namespaced Projection writes a single destination, so
+	// there is nothing to fan out. Kept on the struct only so the existing
+	// cmd/main.go wiring continues to compile until the cluster
+	// reconciler lands in the next PR and takes ownership of the flag.
 	SelectorWriteConcurrency int
 
 	// Controller is the underlying controller.Controller we built in
@@ -148,15 +135,6 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// end-of-reconcile r.Status().Update won't conflict. Avoids a second
 	// reconcile round-trip.
 
-	// Mutual exclusion: namespace and namespaceSelector can't both be set.
-	// Enforced here rather than via CEL because older apiserver CEL versions
-	// (k8s 1.31-) fail to resolve self.namespace for optional string fields.
-	if proj.Spec.Destination.Namespace != "" && proj.Spec.Destination.NamespaceSelector != nil {
-		msg := "destination.namespace and destination.namespaceSelector are mutually exclusive"
-		r.emit(proj, corev1.EventTypeWarning, "InvalidSpec", "Validate", msg)
-		return r.failDestination(ctx, proj, "", "InvalidSpec", msg)
-	}
-
 	gvr, resolvedVersion, err := r.resolveGVR(proj.Spec.Source)
 	if err != nil {
 		return r.failSource(ctx, proj, "SourceResolutionFailed", "Resolve", err.Error())
@@ -165,9 +143,9 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Register a watch on this source GVK if we haven't seen it before, so
 	// subsequent edits to the source enqueue this (and any other) Projection
 	// pointing at it instead of waiting for the next periodic requeue. Key
-	// the watch on the *resolved* version (not the unpinned apiVersion the
-	// user supplied) so pinned (apps/v1) and unpinned (apps/*) Projections
-	// targeting the same Kind share a single watch entry.
+	// the watch on the *resolved* version (not the spec version the user
+	// supplied) so pinned (version: v1) and unpinned (version omitted)
+	// Projections targeting the same Kind share a single watch entry.
 	watchGVK := schema.GroupVersionKind{
 		Group:   gvr.Group,
 		Version: resolvedVersion,
@@ -200,87 +178,7 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.failSource(ctx, proj, reason, "Validate", msg)
 	}
 
-	// Resolve destination namespace(s).
-	destNamespaces, err := r.resolveDestinationNamespaces(ctx, proj)
-	if err != nil {
-		r.emit(proj, corev1.EventTypeWarning, "NamespaceResolutionFailed", "Resolve", err.Error())
-		return r.failDestination(ctx, proj, resolvedVersion, "NamespaceResolutionFailed", err.Error())
-	}
-
-	var failures []nsFailure
-	successSet := map[string]bool{}
-
-	// Fan out destination writes across a bounded worker pool. Sequential
-	// Gets+Updates serialize at ~3-4ms per round-trip, so a Projection
-	// matching 100 namespaces spends ~350ms of reconcile time waiting on
-	// the apiserver. HTTP/2 multiplexing handles the concurrency at the
-	// transport level; we just need to hand it enough work in parallel.
-	// The semaphore caps concurrency at SelectorWriteConcurrency so we
-	// don't DoS the apiserver with a selector matching thousands of
-	// namespaces. The non-positive guard mirrors SetupWithManager's
-	// defaulting so unit tests that bypass it (constructing a reconciler
-	// directly) don't deadlock on a zero-capacity channel. `mu` guards
-	// the two accumulators; contention is minimal (tens of microseconds
-	// per reconcile in aggregate), so a single mutex is preferred over
-	// sharded accumulators.
-	concurrency := r.SelectorWriteConcurrency
-	if concurrency <= 0 {
-		concurrency = defaultSelectorWriteConcurrency
-	}
-	sem := make(chan struct{}, concurrency)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, targetNS := range destNamespaces {
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(ns string) {
-			// Defers run LIFO: wg.Done() fires before the semaphore
-			// release. Both run even if writeOneDestination panics,
-			// which keeps the semaphore from leaking slots and the main
-			// goroutine from blocking forever on wg.Wait().
-			defer func() { <-sem }()
-			defer wg.Done()
-			ok, fail := r.writeOneDestination(ctx, proj, source, ns)
-			mu.Lock()
-			if fail != nil {
-				failures = append(failures, *fail)
-			}
-			if ok {
-				successSet[ns] = true
-			}
-			mu.Unlock()
-		}(targetNS)
-	}
-	wg.Wait()
-
-	// Clean up stale destinations that are no longer in the resolved set.
-	if err := r.cleanupStaleDestinations(ctx, proj, gvr, successSet); err != nil {
-		logger.Error(err, "cleaning up stale destinations")
-		// Non-fatal: log but don't block the reconcile.
-	}
-
-	if len(failures) > 0 {
-		// Pick the most specific failure reason. If all failures share the
-		// same reason (e.g. DestinationConflict), use that; otherwise use a
-		// generic rollup reason. No event is emitted here — the inline
-		// per-namespace emits in the loop above already surfaced each
-		// failure with the right action. failDestination only updates
-		// status/conditions/metrics and schedules the requeue.
-		reason := failures[0].reason
-		for _, f := range failures[1:] {
-			if f.reason != reason {
-				reason = "DestinationWriteFailed"
-				break
-			}
-		}
-		var nsList []string
-		for _, f := range failures {
-			nsList = append(nsList, f.namespace)
-		}
-		msg := failures[0].message
-		if len(failures) > 1 {
-			msg = fmt.Sprintf("failed namespaces: %s", strings.Join(nsList, ", "))
-		}
+	if reason, msg := r.writeDestination(ctx, proj, source); reason != "" {
 		return r.failDestination(ctx, proj, resolvedVersion, reason, msg)
 	}
 
@@ -304,14 +202,9 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 //  2. We use .Build(r) (not .Complete(r)) to capture the controller.Controller
 //     so Reconcile can lazily register new source watches as previously-unseen
 //     GVKs appear. No up-front source watches — Reconcile adds them on demand.
-//  3. A Namespace watch triggers re-reconciliation of selector-based Projections
-//     whenever the set of namespaces changes.
 func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.RequeueInterval == 0 {
 		r.RequeueInterval = 30 * time.Second
-	}
-	if r.SelectorWriteConcurrency <= 0 {
-		r.SelectorWriteConcurrency = defaultSelectorWriteConcurrency
 	}
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, sourceIndex,
 		func(obj client.Object) []string {
@@ -319,46 +212,13 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if !ok {
 				return nil
 			}
-			gv, err := schema.ParseGroupVersion(p.Spec.Source.APIVersion)
-			if err != nil {
-				// Malformed apiVersion — admission should reject this, but if it
-				// ever slips through, indexing under "" rather than panicking
-				// keeps the controller alive. Reconcile will surface the error
-				// via SourceResolutionFailed; the V(1) log here is defense-in-depth
-				// for cases where admission silently failed-open (CRD removed,
-				// schema migration, manual etcd write).
-				ctrl.Log.WithName("source-indexer").V(1).Info(
-					"skipping index entry for malformed apiVersion",
-					"projection", client.ObjectKeyFromObject(p), "apiVersion", p.Spec.Source.APIVersion)
-				return nil
-			}
-			return []string{sourceKey(
-				gv.Group,
-				p.Spec.Source.Kind,
-				p.Spec.Source.Namespace,
-				p.Spec.Source.Name,
-			)}
+			return []string{sourceKey(p.Spec.Source)}
 		}); err != nil {
 		return fmt.Errorf("registering source field indexer: %w", err)
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, selectorIndex,
-		func(obj client.Object) []string {
-			p, ok := obj.(*projectionv1.Projection)
-			if !ok {
-				return nil
-			}
-			if p.Spec.Destination.NamespaceSelector != nil {
-				return []string{selectorIndexValue}
-			}
-			return nil
-		}); err != nil {
-		return fmt.Errorf("registering selector field indexer: %w", err)
-	}
-
 	c, err := builder.ControllerManagedBy(mgr).
 		For(&projectionv1.Projection{}).
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.mapNamespace)).
 		Build(r)
 	if err != nil {
 		return err

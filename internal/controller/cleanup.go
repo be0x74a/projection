@@ -28,6 +28,11 @@ import (
 	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
+// deleteDestination removes the namespaced Projection's single owned
+// destination if it still exists and our ownership annotation is still
+// present. Returns nil for the source-no-longer-resolvable case so the
+// finalizer can still complete — losing the source Kind shouldn't trap
+// the Projection in Terminating forever.
 func (d *ControllerDeps) deleteDestination(ctx context.Context, proj *projectionv1.Projection) error {
 	gvr, _, err := d.resolveGVR(proj.Spec.Source)
 	if err != nil {
@@ -35,14 +40,6 @@ func (d *ControllerDeps) deleteDestination(ctx context.Context, proj *projection
 		// Proceed with finalizer removal rather than blocking forever.
 		return nil
 	}
-
-	// For selector-based Projections (or any Projection that may have previously
-	// used a selector), scan all namespaces for owned destinations.
-	if proj.Spec.Destination.NamespaceSelector != nil {
-		return d.deleteAllOwnedDestinations(ctx, proj, gvr)
-	}
-
-	// Single-namespace path.
 	ns, name := destinationCoords(proj)
 	return d.deleteOneDestination(ctx, proj, gvr, ns, name)
 }
@@ -74,9 +71,11 @@ func (d *ControllerDeps) deleteOneDestination(ctx context.Context, proj *project
 }
 
 // deleteAllOwnedDestinations deletes every destination owned by this
-// Projection. Used by the finalizer path for selector-based Projections,
-// where the selector may have changed since the last reconcile and we need
-// to sweep across all namespaces the Projection ever wrote to.
+// Projection. Today the namespaced reconciler only ever writes one
+// destination, so this is functionally equivalent to deleteOneDestination —
+// but the source-deleted path through handleSourceFetchError still calls
+// it, and keeping the implementation label-driven means it stays correct
+// if a future migration leaves stragglers in unexpected namespaces.
 //
 // Finds destinations via a single cluster-wide List on the destination GVK
 // filtered by the ownedByUIDLabel — O(owned) instead of O(all cluster
@@ -110,51 +109,6 @@ func (d *ControllerDeps) deleteAllOwnedDestinations(ctx context.Context, proj *p
 			continue
 		}
 		d.emit(proj, corev1.EventTypeNormal, "DestinationDeleted", "Delete",
-			fmt.Sprintf("%s/%s", ns, name))
-	}
-	return firstErr
-}
-
-// cleanupStaleDestinations removes destinations in namespaces that are owned
-// by this Projection but are no longer in the current resolved set. This
-// handles the case where a namespace loses a label or the selector changes.
-// O(owned destinations) per call via a single cluster-wide List filtered by
-// the ownedByUIDLabel — independent of total cluster namespace count (#33).
-// Runs only for selector-based Projections.
-func (d *ControllerDeps) cleanupStaleDestinations(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, currentSet map[string]bool) error {
-	// Only needed for selector-based Projections.
-	if proj.Spec.Destination.NamespaceSelector == nil {
-		return nil
-	}
-	ownerValue := ownerKey(proj)
-
-	owned, err := d.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
-		LabelSelector: ownedByUIDSelector(proj),
-	})
-	if err != nil {
-		return fmt.Errorf("listing owned destinations for stale cleanup: %w", err)
-	}
-	var firstErr error
-	for i := range owned.Items {
-		obj := &owned.Items[i]
-		ns := obj.GetNamespace()
-		if currentSet[ns] {
-			continue // still in the resolved set, keep it
-		}
-		// Belt-and-braces ownership check; see deleteAllOwnedDestinations
-		// for why the label alone isn't sufficient when the namespace is
-		// controlled by someone other than us.
-		if obj.GetAnnotations()[ownedByAnnotation] != ownerValue {
-			continue
-		}
-		name := obj.GetName()
-		if err := d.DynamicClient.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		d.emit(proj, corev1.EventTypeNormal, "StaleDestinationDeleted", "Delete",
 			fmt.Sprintf("%s/%s", ns, name))
 	}
 	return firstErr

@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,32 +32,27 @@ import (
 
 // Ownership stamps applied to every destination by buildDestination.
 // destination-side cleanup paths (cleanup.go) read these back to identify
-// objects we own.
+// objects we own. The "-projection" suffix in both keys reserves namespace
+// for the cluster-scoped reconciler to use a parallel pair of keys
+// (e.g. owned-by-cluster-projection / owned-by-cluster-projection-uid)
+// without confusing the two ownership tiers.
 const (
 	// ownedByAnnotation records the owning Projection's namespaced name. The
 	// label below is sufficient for cooperative lookups; the annotation is
 	// the belt-and-braces ownership check that protects against a buggy or
 	// malicious actor copying our label onto a stranger's object.
-	ownedByAnnotation = "projection.sh/owned-by"
+	ownedByAnnotation = "projection.sh/owned-by-projection"
 
 	// ownedByUIDLabel is a label stamped on every destination by
 	// buildDestination. Value is the owning Projection's UID. Enables
-	// cleanup paths to locate owned destinations via a single cluster-wide
-	// List(LabelSelector) instead of walking every namespace in the cluster
-	// (#33). Label values are capped at 63 chars and permit [a-z0-9-] plus
-	// dashes; Kubernetes UIDs are RFC-4122 UUIDs (36 chars), both within
-	// the label-value regex and well under the length limit.
-	ownedByUIDLabel = "projection.sh/owned-by-uid"
+	// destination-side watches to filter events down to objects this
+	// reconciler owns via a single cluster-wide List(LabelSelector)
+	// instead of walking every namespace (#33). Label values are capped
+	// at 63 chars and permit [a-z0-9-] plus dashes; Kubernetes UIDs are
+	// RFC-4122 UUIDs (36 chars), both within the label-value regex and
+	// well under the length limit.
+	ownedByUIDLabel = "projection.sh/owned-by-projection-uid"
 )
-
-// nsFailure records a single per-namespace destination-write failure during
-// selector fan-out. The rollup block after the worker pool inspects these to
-// pick the most specific reason for the DestinationWritten=False condition.
-type nsFailure struct {
-	namespace string
-	reason    string
-	message   string
-}
 
 // Dropped from metadata on every projection. These are either server-owned
 // (the apiserver rejects or ignores writes) or meaningful only in the source
@@ -106,38 +100,13 @@ var droppedSpecFieldsByGVK = map[schema.GroupVersionKind][][]string{
 	},
 }
 
-// resolveDestinationNamespaces returns the list of namespace names the
-// destination should be written to. For single-namespace Projections this
-// returns a single entry; for selector-based Projections it lists all
-// namespaces matching the label selector.
-func (d *ControllerDeps) resolveDestinationNamespaces(ctx context.Context, proj *projectionv1.Projection) ([]string, error) {
-	if proj.Spec.Destination.NamespaceSelector == nil {
-		ns, _ := destinationCoords(proj)
-		return []string{ns}, nil
-	}
-	sel, err := metav1.LabelSelectorAsSelector(proj.Spec.Destination.NamespaceSelector)
-	if err != nil {
-		return nil, fmt.Errorf("parsing namespaceSelector: %w", err)
-	}
-	var nsList corev1.NamespaceList
-	if err := d.List(ctx, &nsList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
-		return nil, fmt.Errorf("listing namespaces: %w", err)
-	}
-	result := make([]string, 0, len(nsList.Items))
-	for i := range nsList.Items {
-		result = append(result, nsList.Items[i].Name)
-	}
-	return result, nil
-}
-
-// destinationCoords resolves the namespace+name a single-destination Projection
-// writes to, applying defaults (Projection's own namespace, source name) when
-// the spec leaves them empty.
+// destinationCoords resolves the namespace+name a namespaced Projection
+// writes to. The destination namespace is always the Projection's own
+// namespace (cross-namespace mirroring is the cluster-scoped sibling's
+// job). The destination name defaults to the source's when the spec
+// leaves it empty.
 func destinationCoords(proj *projectionv1.Projection) (namespace, name string) {
-	namespace = proj.Spec.Destination.Namespace
-	if namespace == "" {
-		namespace = proj.Namespace
-	}
+	namespace = proj.Namespace
 	name = proj.Spec.Destination.Name
 	if name == "" {
 		name = proj.Spec.Source.Name
@@ -261,30 +230,16 @@ func needsUpdate(existing, desired *unstructured.Unstructured) bool {
 	return false
 }
 
-// writeOneDestination reconciles a single destination namespace for proj.
-// It is safe to invoke concurrently for distinct targetNS values — the method
-// only reads the shared inputs (proj, source) and writes to the apiserver;
-// all per-reconcile accumulator state is returned to the caller. Events are
-// emitted here rather than in the caller so each worker surfaces its own
-// outcome without cross-goroutine coordination; the controller-runtime event
-// recorder is itself thread-safe.
-//
-// Returned (ok, failure) are orthogonal:
-//
-//   - ok=true, failure=nil: destination left in the desired state (created,
-//     updated, or already matching). Caller adds targetNS to successSet.
-//   - ok=false, failure=non-nil: per-namespace failure. Caller appends to
-//     the failures slice; the rollup block after the worker pool picks a
-//     reason and calls failDestination.
-//
-// ok=true with failure=non-nil is not a valid combination and the caller
-// is free to treat only one of the two.
-func (d *ControllerDeps) writeOneDestination(
+// writeDestination creates or updates the namespaced Projection's single
+// destination object. Returns (reason, message) when the write fails so
+// the caller can flip DestinationWritten=False with the right vocabulary.
+// reason is "" on success.
+func (d *ControllerDeps) writeDestination(
 	ctx context.Context,
 	proj *projectionv1.Projection,
 	source *unstructured.Unstructured,
-	targetNS string,
-) (ok bool, failure *nsFailure) {
+) (reason, message string) {
+	targetNS, _ := destinationCoords(proj)
 	dst := buildDestination(source, proj, targetNS)
 
 	existing := &unstructured.Unstructured{}
@@ -293,9 +248,8 @@ func (d *ControllerDeps) writeOneDestination(
 	switch fetchErr := d.Get(ctx, key, existing); {
 	case apierrors.IsNotFound(fetchErr):
 		if createErr := d.Create(ctx, dst); createErr != nil {
-			d.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create",
-				fmt.Sprintf("failed to create in %s: %s", targetNS, createErr.Error()))
-			return false, &nsFailure{targetNS, "DestinationCreateFailed", createErr.Error()}
+			d.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create", createErr.Error())
+			return "DestinationCreateFailed", createErr.Error()
 		}
 		d.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
 			fmt.Sprintf("projected %s %s/%s to %s/%s",
@@ -303,15 +257,14 @@ func (d *ControllerDeps) writeOneDestination(
 				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
 				dst.GetNamespace(), dst.GetName()))
 	case fetchErr != nil:
-		d.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get",
-			fmt.Sprintf("failed to fetch in %s: %s", targetNS, fetchErr.Error()))
-		return false, &nsFailure{targetNS, "DestinationFetchFailed", fetchErr.Error()}
+		d.emit(proj, corev1.EventTypeWarning, "DestinationFetchFailed", "Get", fetchErr.Error())
+		return "DestinationFetchFailed", fetchErr.Error()
 	default:
 		if !isOwnedBy(existing, proj) {
 			msg := fmt.Sprintf("destination %s/%s exists and is not owned by this Projection",
 				key.Namespace, key.Name)
 			d.emit(proj, corev1.EventTypeWarning, "DestinationConflict", "Validate", msg)
-			return false, &nsFailure{targetNS, "DestinationConflict", msg}
+			return "DestinationConflict", msg
 		}
 		// Carry over fields the apiserver allocated on create (clusterIP,
 		// volumeName, ...) — if we sent dst as-is, an Update of e.g. a Service
@@ -320,16 +273,13 @@ func (d *ControllerDeps) writeOneDestination(
 		if !needsUpdate(existing, dst) {
 			// Destination already matches desired state. Skip the Update so
 			// we don't generate a noisy "Updated" event/metric on every
-			// reconcile of an unchanged Projection. Still considered ok so
-			// the caller records it in successSet (keeps it out of the
-			// stale-cleanup set).
-			return true, nil
+			// reconcile of an unchanged Projection.
+			return "", ""
 		}
 		dst.SetResourceVersion(existing.GetResourceVersion())
 		if updateErr := d.Update(ctx, dst); updateErr != nil {
-			d.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update",
-				fmt.Sprintf("failed to update in %s: %s", targetNS, updateErr.Error()))
-			return false, &nsFailure{targetNS, "DestinationUpdateFailed", updateErr.Error()}
+			d.emit(proj, corev1.EventTypeWarning, "DestinationUpdateFailed", "Update", updateErr.Error())
+			return "DestinationUpdateFailed", updateErr.Error()
 		}
 		d.emit(proj, corev1.EventTypeNormal, "Updated", "Update",
 			fmt.Sprintf("updated %s %s/%s to %s/%s",
@@ -337,5 +287,5 @@ func (d *ControllerDeps) writeOneDestination(
 				proj.Spec.Source.Namespace, proj.Spec.Source.Name,
 				dst.GetNamespace(), dst.GetName()))
 	}
-	return true, nil
+	return "", ""
 }
