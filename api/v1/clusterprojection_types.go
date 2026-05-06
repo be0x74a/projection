@@ -60,10 +60,11 @@ type ClusterProjectionDestination struct {
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
-	// Name in each destination namespace. Defaults to Source.Name when empty.
-	// The same Name is written into every targeted namespace.
+	// Name in each destination namespace (DNS-1123 subdomain). Defaults to
+	// Source.Name when empty. The same Name is written into every targeted
+	// namespace.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name,omitempty"`
 }

@@ -88,10 +88,11 @@ spec:
                 properties:
                   name:
                     description: |-
-                      Name in each destination namespace. Defaults to Source.Name when empty.
-                      The same Name is written into every targeted namespace.
+                      Name in each destination namespace (DNS-1123 subdomain). Defaults to
+                      Source.Name when empty. The same Name is written into every targeted
+                      namespace.
                     maxLength: 253
-                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   namespaceSelector:
                     description: |-
@@ -166,16 +167,16 @@ spec:
                     additionalProperties:
                       type: string
                     description: |-
-                      Annotations merged onto the destination's metadata.annotations.
-                      Same merge rule as Labels.
+                      Annotations are merged onto the destination's metadata.annotations.
+                      Same overlay-wins merge rule as Labels.
                     type: object
                   labels:
                     additionalProperties:
                       type: string
                     description: |-
-                      Labels merged onto the destination's metadata.labels. Source labels
-                      win on conflict for keys the source already has; overlay wins for
-                      overlay-only keys. (See concepts.md for the full merge rule.)
+                      Labels are merged onto the destination's metadata.labels. Overlay
+                      entries win on key conflicts with the source (overlay-last semantics);
+                      source-only and overlay-only keys are kept as-is.
                     type: object
                 type: object
               source:
@@ -192,9 +193,9 @@ spec:
                     pattern: ^[A-Z][a-zA-Z0-9]*$
                     type: string
                   name:
-                    description: Name of the source object.
+                    description: Name of the source object (DNS-1123 subdomain).
                     maxLength: 253
-                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   namespace:
                     description: Namespace where the source object lives.
@@ -205,8 +206,10 @@ spec:
                     description: |-
                       Version is the API version of the source object within its Group. Omit
                       for non-core groups to use the RESTMapper's preferred served version
-                      (the source automatically follows CRD version promotions).
-                    pattern: ^$|^v[0-9]+([a-z]+[0-9]+)?$
+                      (the source automatically follows CRD version promotions). When set,
+                      must match Kubernetes' canonical version-string shape (`vN`,
+                      `vNalphaM`, `vNbetaM`).
+                    pattern: ^$|^v[0-9]+((alpha|beta)[0-9]+)?$
                     type: string
                 required:
                 - kind

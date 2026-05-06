@@ -35,9 +35,11 @@ type SourceRef struct {
 
 	// Version is the API version of the source object within its Group. Omit
 	// for non-core groups to use the RESTMapper's preferred served version
-	// (the source automatically follows CRD version promotions).
+	// (the source automatically follows CRD version promotions). When set,
+	// must match Kubernetes' canonical version-string shape (`vN`,
+	// `vNalphaM`, `vNbetaM`).
 	// +optional
-	// +kubebuilder:validation:Pattern=`^$|^v[0-9]+([a-z]+[0-9]+)?$`
+	// +kubebuilder:validation:Pattern=`^$|^v[0-9]+((alpha|beta)[0-9]+)?$`
 	Version string `json:"version,omitempty"`
 
 	// Kind is the API Kind of the source object (PascalCase).
@@ -49,8 +51,8 @@ type SourceRef struct {
 	// +kubebuilder:validation:MaxLength=63
 	Namespace string `json:"namespace"`
 
-	// Name of the source object.
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	// Name of the source object (DNS-1123 subdomain).
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
@@ -60,14 +62,14 @@ type SourceRef struct {
 // namespace cannot be touched (they are set by the controller from the
 // destination spec).
 type Overlay struct {
-	// Labels merged onto the destination's metadata.labels. Source labels
-	// win on conflict for keys the source already has; overlay wins for
-	// overlay-only keys. (See concepts.md for the full merge rule.)
+	// Labels are merged onto the destination's metadata.labels. Overlay
+	// entries win on key conflicts with the source (overlay-last semantics);
+	// source-only and overlay-only keys are kept as-is.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 
-	// Annotations merged onto the destination's metadata.annotations.
-	// Same merge rule as Labels.
+	// Annotations are merged onto the destination's metadata.annotations.
+	// Same overlay-wins merge rule as Labels.
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
 }

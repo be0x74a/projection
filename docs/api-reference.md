@@ -54,9 +54,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `namespaces` _string array_ | Namespaces is an explicit list of destination namespaces. Mutually<br />exclusive with NamespaceSelector. Each entry is a DNS-1123 label. |  | Optional: \{\} <br /> |
+| `namespaces` _string array_ | Namespaces is an explicit list of destination namespaces. Mutually<br />exclusive with NamespaceSelector. Each entry is a DNS-1123 label;<br />at least one entry is required when this field is set. |  | MinItems: 1 <br />Optional: \{\} <br /> |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#labelselector-v1-meta)_ | NamespaceSelector picks destination namespaces by label. Mutually<br />exclusive with Namespaces. |  | Optional: \{\} <br /> |
-| `name` _string_ | Name in each destination namespace. Defaults to Source.Name when empty.<br />The same Name is written into every targeted namespace. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$` <br />Optional: \{\} <br /> |
+| `name` _string_ | Name in each destination namespace (DNS-1123 subdomain). Defaults to<br />Source.Name when empty. The same Name is written into every targeted<br />namespace. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Optional: \{\} <br /> |
 
 
 #### ClusterProjectionList
@@ -138,8 +138,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `labels` _object (keys:string, values:string)_ | Labels merged onto the destination's metadata.labels. Source labels<br />win on conflict for keys the source already has; overlay wins for<br />overlay-only keys. (See concepts.md for the full merge rule.) |  | Optional: \{\} <br /> |
-| `annotations` _object (keys:string, values:string)_ | Annotations merged onto the destination's metadata.annotations.<br />Same merge rule as Labels. |  | Optional: \{\} <br /> |
+| `labels` _object (keys:string, values:string)_ | Labels are merged onto the destination's metadata.labels. Overlay<br />entries win on key conflicts with the source (overlay-last semantics);<br />source-only and overlay-only keys are kept as-is. |  | Optional: \{\} <br /> |
+| `annotations` _object (keys:string, values:string)_ | Annotations are merged onto the destination's metadata.annotations.<br />Same overlay-wins merge rule as Labels. |  | Optional: \{\} <br /> |
 
 
 #### Projection
@@ -177,7 +177,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `name` _string_ | Name in the destination namespace. Defaults to Source.Name when empty. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$` <br />Optional: \{\} <br /> |
+| `name` _string_ | Name in the destination namespace (DNS-1123 subdomain). Defaults to<br />Source.Name when empty. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Optional: \{\} <br /> |
 
 
 #### ProjectionList
@@ -262,9 +262,9 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `group` _string_ | Group is the API group of the source object. Empty string means the<br />core group (e.g. ConfigMap, Secret, Service). |  | Pattern: `^$\|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Optional: \{\} <br /> |
-| `version` _string_ | Version is the API version of the source object within its Group. Omit<br />for non-core groups to use the RESTMapper's preferred served version<br />(the source automatically follows CRD version promotions). |  | Pattern: `^$\|^v[0-9]+([a-z]+[0-9]+)?$` <br />Optional: \{\} <br /> |
+| `version` _string_ | Version is the API version of the source object within its Group. Omit<br />for non-core groups to use the RESTMapper's preferred served version<br />(the source automatically follows CRD version promotions). When set,<br />must match Kubernetes' canonical version-string shape (`vN`,<br />`vNalphaM`, `vNbetaM`). |  | Pattern: `^$\|^v[0-9]+((alpha\|beta)[0-9]+)?$` <br />Optional: \{\} <br /> |
 | `kind` _string_ | Kind is the API Kind of the source object (PascalCase). |  | Pattern: `^[A-Z][a-zA-Z0-9]*$` <br /> |
 | `namespace` _string_ | Namespace where the source object lives. |  | MaxLength: 63 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br /> |
-| `name` _string_ | Name of the source object. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$` <br /> |
+| `name` _string_ | Name of the source object (DNS-1123 subdomain). |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br /> |
 
 

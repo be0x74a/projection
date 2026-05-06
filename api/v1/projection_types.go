@@ -43,9 +43,10 @@ type ProjectionSpec struct {
 
 // ProjectionDestination configures the rename override for a namespaced Projection.
 type ProjectionDestination struct {
-	// Name in the destination namespace. Defaults to Source.Name when empty.
+	// Name in the destination namespace (DNS-1123 subdomain). Defaults to
+	// Source.Name when empty.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name,omitempty"`
 }
