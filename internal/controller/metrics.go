@@ -51,6 +51,17 @@ var watchedGvks = prometheus.NewGauge(
 	},
 )
 
+// watchedDestGvks counts distinct destination GVKs the controller is
+// watching for self-healing (ensureDestWatch). Same Gauge rationale as
+// watchedGvks — the value rises monotonically today but the type leaves
+// room for pruning later.
+var watchedDestGvks = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "projection_watched_dest_gvks",
+		Help: "Number of distinct destination GroupVersionKinds the controller is watching for manual-edit / delete healing.",
+	},
+)
+
 func init() {
-	metrics.Registry.MustRegister(reconcileTotal, watchedGvks)
+	metrics.Registry.MustRegister(reconcileTotal, watchedGvks, watchedDestGvks)
 }

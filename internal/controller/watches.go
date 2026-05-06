@@ -18,12 +18,16 @@ package controller
 
 import (
 	"context"
+	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -33,10 +37,18 @@ import (
 // Field-indexer keys registered on Projection in SetupWithManager. mapSource
 // looks up Projections by sourceIndex.
 const (
-	// sourceIndex is the field-indexer key we register on Projection so that
+	// sourceIndex is the field-indexer key we register on Projection (and
+	// ClusterProjection — different per-CR registration, same key) so that
 	// a source-object event can be mapped to all Projections pointing at it
 	// via a single cached List(MatchingFields).
 	sourceIndex = "spec.sourceKey"
+
+	// uidIndex is the field-indexer key we register on each CR type
+	// (Projection, ClusterProjection) on metadata.uid. ensureDestWatch
+	// resolves a destination's UID-label value to its owner via a single
+	// cached List(MatchingFields) on this index — O(1) regardless of how
+	// many Projections live in the cluster.
+	uidIndex = "metadata.uid"
 )
 
 // ensureSourceWatch registers a dynamic watch on the given source GVK if one
@@ -94,4 +106,78 @@ func (r *ProjectionReconciler) mapSource(ctx context.Context, obj client.Object)
 		})
 	}
 	return reqs
+}
+
+// ensureDestWatch registers a label-filtered dynamic watch on the given
+// destination GVK if one is not already in place. Used by both the
+// namespaced and cluster reconcilers so a manual `kubectl delete` of a
+// projected object triggers immediate reconciliation rather than waiting
+// for the next periodic resync.
+//
+// uidLabel is the label key whose presence marks an object as owned by
+// some incarnation of this reconciler's CR type (e.g.
+// "projection.sh/owned-by-projection-uid"). The watch source pre-filters
+// via PartialObjectMetadata plus a label-existence predicate, so we don't
+// pay deserialization cost on every random object change in the cluster.
+//
+// enqueueByUID maps a UID-label value back to a single reconcile.Request
+// via the per-CR-type metadata.uid field indexer. Returns nil if no
+// owner is found (label was stale or this is a sibling reconciler's
+// object).
+//
+// The annotation is the authoritative ownership signal — the label is only
+// a watch hint. enqueueByUID can return false positives if a stranger
+// stamps our label on their object; the resulting reconcile then no-ops
+// at writeDestination because isOwnedBy / isOwnedByCluster checks the
+// annotation. So a misleading label costs at most one wasted reconcile,
+// not data corruption.
+func (deps *ControllerDeps) ensureDestWatch(
+	ctrlr controller.Controller,
+	cch cache.Cache,
+	gvk schema.GroupVersionKind,
+	uidLabel string,
+	enqueueByUID func(ctx context.Context, uid string) []reconcile.Request,
+	watched map[schema.GroupVersionKind]bool,
+	mu *sync.Mutex,
+) error {
+	if ctrlr == nil || cch == nil {
+		return nil
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if watched[gvk] {
+		return nil
+	}
+
+	// PartialObjectMetadata so the watch only deserializes object metadata,
+	// not the full payload. We only need labels to filter and metadata.name
+	// to look up the owner.
+	obj := &metav1.PartialObjectMetadata{}
+	obj.SetGroupVersionKind(gvk)
+
+	// Label-existence predicate: forward only events for objects carrying
+	// the UID label key. The label value is dereferenced to an owner
+	// inside the handler.
+	pred := predicate.NewTypedPredicateFuncs[client.Object](func(o client.Object) bool {
+		_, ok := o.GetLabels()[uidLabel]
+		return ok
+	})
+
+	src := source.Kind(cch, client.Object(obj),
+		handler.TypedEnqueueRequestsFromMapFunc[client.Object](
+			func(ctx context.Context, o client.Object) []reconcile.Request {
+				uid := o.GetLabels()[uidLabel]
+				if uid == "" {
+					return nil
+				}
+				return enqueueByUID(ctx, uid)
+			}),
+		pred)
+
+	if err := ctrlr.Watch(src); err != nil {
+		return err
+	}
+	watched[gvk] = true
+	watchedDestGvks.Inc()
+	return nil
 }

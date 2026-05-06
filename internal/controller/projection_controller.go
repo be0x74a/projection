@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
@@ -42,7 +43,7 @@ import (
 // (ClusterProjection) and its dedicated reconciler.
 type ProjectionReconciler struct {
 	// ControllerDeps bundles the apiserver-facing dependencies shared with
-	// the future ClusterProjectionReconciler (Client, Scheme, DynamicClient,
+	// ClusterProjectionReconciler (Client, Scheme, DynamicClient,
 	// RESTMapper, Recorder). Embedded so `r.Client`, `r.Scheme`, etc. continue
 	// to resolve via promotion and existing callsites read unchanged. Pointer
 	// embedding lets cmd/main.go and tests build the reconciler with a single
@@ -60,14 +61,6 @@ type ProjectionReconciler struct {
 	// don't need to set it explicitly).
 	RequeueInterval time.Duration
 
-	// SelectorWriteConcurrency is reserved for the cluster-scoped sibling
-	// (ClusterProjectionReconciler) and currently unused by this
-	// reconciler — namespaced Projection writes a single destination, so
-	// there is nothing to fan out. Kept on the struct only so the existing
-	// cmd/main.go wiring continues to compile until the cluster
-	// reconciler lands in the next PR and takes ownership of the flag.
-	SelectorWriteConcurrency int
-
 	// Controller is the underlying controller.Controller we built in
 	// SetupWithManager. We need it so Reconcile can register new source
 	// watches lazily as previously-unseen source GVKs show up. It is nil
@@ -77,8 +70,18 @@ type ProjectionReconciler struct {
 	// Also nil in direct-reconcile unit tests.
 	Cache cache.Cache
 
+	// Source-watch state. ensureSourceWatch deduplicates so we register at
+	// most one watch per source GVK regardless of how many Projections
+	// converge on the same Kind.
 	watchedMu sync.Mutex
 	watched   map[schema.GroupVersionKind]bool
+
+	// Destination-watch state. ensureDestWatch registers a label-filtered
+	// watch on the destination GVK so a manual `kubectl delete` of a
+	// projected object triggers immediate reconciliation. Same dedupe
+	// shape as the source-watch map.
+	watchedDestsMu sync.Mutex
+	watchedDests   map[schema.GroupVersionKind]bool
 }
 
 // benchStampAnnotation is the annotation the projection benchmark harness
@@ -182,6 +185,14 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.failDestination(ctx, proj, resolvedVersion, reason, msg)
 	}
 
+	// Register the dest-side watch after the first successful write. Any
+	// subsequent manual `kubectl delete` (or stranger overwrite) of the
+	// projected object now triggers an immediate reconcile via the watch
+	// rather than waiting for the periodic resync.
+	if err := r.ensureNamespacedDestWatch(watchGVK); err != nil {
+		logger.Error(err, "registering destination watch", "gvk", watchGVK)
+	}
+
 	if err := r.markAllReady(ctx, proj, resolvedVersion); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -192,20 +203,64 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
+// ensureNamespacedDestWatch wires the shared ensureDestWatch helper for the
+// namespaced UID label and field indexer.
+func (r *ProjectionReconciler) ensureNamespacedDestWatch(gvk schema.GroupVersionKind) error {
+	if r.watchedDests == nil {
+		r.watchedDestsMu.Lock()
+		if r.watchedDests == nil {
+			r.watchedDests = map[schema.GroupVersionKind]bool{}
+		}
+		r.watchedDestsMu.Unlock()
+	}
+	return r.ensureDestWatch(r.Controller, r.Cache, gvk, ownedByUIDLabel,
+		r.enqueueByUID, r.watchedDests, &r.watchedDestsMu)
+}
+
+// enqueueByUID resolves a UID-label value back to the owning Projection's
+// namespaced name via the metadata.uid field indexer. The indexer keeps
+// the lookup O(1) regardless of cluster size; without it we'd have to
+// walk every Projection in the cluster on every dest event.
+func (r *ProjectionReconciler) enqueueByUID(ctx context.Context, uid string) []reconcile.Request {
+	if uid == "" {
+		return nil
+	}
+	var list projectionv1.ProjectionList
+	if err := r.List(ctx, &list, client.MatchingFields{uidIndex: uid}); err != nil {
+		log.FromContext(ctx).Error(err, "listing projections by uid index", "uid", uid)
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		p := &list.Items[i]
+		reqs = append(reqs, reconcile.Request{
+			NamespacedName: client.ObjectKey{Namespace: p.Namespace, Name: p.Name},
+		})
+	}
+	return reqs
+}
+
 // SetupWithManager sets up the controller with the Manager.
 //
-// Two things happen here that Reconcile relies on:
+// Three things happen here that Reconcile relies on:
 //
 //  1. A field indexer on Projection.spec indexes each CR by the canonical
 //     sourceKey of its source ref, so mapSource can list all projections
 //     referencing a changed source via a single cached List.
-//  2. We use .Build(r) (not .Complete(r)) to capture the controller.Controller
-//     so Reconcile can lazily register new source watches as previously-unseen
-//     GVKs appear. No up-front source watches — Reconcile adds them on demand.
+//  2. A field indexer on Projection.metadata.uid lets ensureDestWatch's
+//     handler resolve a destination's UID-label value back to its owner
+//     in O(1) (single cached List, no full-cluster scan).
+//  3. We use .Build(r) (not .Complete(r)) to capture the controller.Controller
+//     so Reconcile can lazily register source / destination watches as
+//     previously-unseen GVKs appear. No up-front watches — Reconcile adds
+//     them on demand.
 func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.RequeueInterval == 0 {
 		r.RequeueInterval = 30 * time.Second
 	}
+	r.watched = map[schema.GroupVersionKind]bool{}
+	r.watchedDests = map[schema.GroupVersionKind]bool{}
+
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, sourceIndex,
 		func(obj client.Object) []string {
 			p, ok := obj.(*projectionv1.Projection)
@@ -215,6 +270,16 @@ func (r *ProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return []string{sourceKey(p.Spec.Source)}
 		}); err != nil {
 		return fmt.Errorf("registering source field indexer: %w", err)
+	}
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &projectionv1.Projection{}, uidIndex,
+		func(obj client.Object) []string {
+			p, ok := obj.(*projectionv1.Projection)
+			if !ok {
+				return nil
+			}
+			return []string{string(p.UID)}
+		}); err != nil {
+		return fmt.Errorf("registering projection uid field indexer: %w", err)
 	}
 
 	c, err := builder.ControllerManagedBy(mgr).

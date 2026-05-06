@@ -49,15 +49,28 @@ func resolvedVersionMessage(src projectionv1.SourceRef, resolvedVersion string) 
 		src.Group, src.Kind, resolvedVersion)
 }
 
-// setCondition mutates proj.Status.Conditions locally (no API call) so callers
-// can stage several condition updates and flush them with a single Status().Update.
-func setCondition(proj *projectionv1.Projection, condType string, status metav1.ConditionStatus, reason, message string) {
-	apimeta.SetStatusCondition(&proj.Status.Conditions, metav1.Condition{
+// setConditionOn mutates the given conditions slice locally (no API call) so
+// callers can stage several condition updates and flush them with a single
+// Status().Update. CR-agnostic — both Projection and ClusterProjection point
+// at this via tiny wrappers.
+func setConditionOn(conds *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string) {
+	apimeta.SetStatusCondition(conds, metav1.Condition{
 		Type:    condType,
 		Status:  status,
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+// setCondition mutates proj.Status.Conditions locally (no API call) so callers
+// can stage several condition updates and flush them with a single Status().Update.
+func setCondition(proj *projectionv1.Projection, condType string, status metav1.ConditionStatus, reason, message string) {
+	setConditionOn(&proj.Status.Conditions, condType, status, reason, message)
+}
+
+// setClusterCondition is the cluster-tier sibling of setCondition.
+func setClusterCondition(cp *projectionv1.ClusterProjection, condType string, status metav1.ConditionStatus, reason, message string) {
+	setConditionOn(&cp.Status.Conditions, condType, status, reason, message)
 }
 
 // failSource records a failure that happened before we got a resolved source
