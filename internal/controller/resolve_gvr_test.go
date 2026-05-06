@@ -58,7 +58,7 @@ func TestResolveGVRRejectsClusterScoped(t *testing.T) {
 		},
 	}
 
-	r := &ProjectionReconciler{RESTMapper: mapper}
+	r := &ProjectionReconciler{ControllerDeps: &ControllerDeps{RESTMapper: mapper}}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := r.resolveGVR(tc.src)
@@ -87,7 +87,7 @@ func TestResolveGVRPreferredVersion(t *testing.T) {
 	mapper.Add(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, apimeta.RESTScopeNamespace)
 	mapper.Add(schema.GroupVersionKind{Group: "apps", Version: "v1beta2", Kind: "Deployment"}, apimeta.RESTScopeNamespace)
 
-	r := &ProjectionReconciler{RESTMapper: mapper}
+	r := &ProjectionReconciler{ControllerDeps: &ControllerDeps{RESTMapper: mapper}}
 
 	t.Run("pinned form returns the pinned version", func(t *testing.T) {
 		gvr, version, err := r.resolveGVR(projectionv1.SourceRef{

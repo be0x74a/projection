@@ -67,11 +67,13 @@ func newReconciler() *ProjectionReconciler {
 	Expect(err).NotTo(HaveOccurred())
 
 	return &ProjectionReconciler{
-		Client:        k8sClient,
-		Scheme:        k8sClient.Scheme(),
-		DynamicClient: dynClient,
-		RESTMapper:    mapper,
-		Recorder:      events.NewFakeRecorder(16),
+		ControllerDeps: &ControllerDeps{
+			Client:        k8sClient,
+			Scheme:        k8sClient.Scheme(),
+			DynamicClient: dynClient,
+			RESTMapper:    mapper,
+			Recorder:      events.NewFakeRecorder(16),
+		},
 	}
 }
 
@@ -1229,9 +1231,11 @@ var _ = Describe("Projection Controller (integration)", func() {
 				Build()
 			fakeRecorder := events.NewFakeRecorder(16)
 			fakeR := &ProjectionReconciler{
-				Client:   fakeClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: fakeRecorder,
+				ControllerDeps: &ControllerDeps{
+					Client:   fakeClient,
+					Scheme:   k8sClient.Scheme(),
+					Recorder: fakeRecorder,
+				},
 			}
 			projKey := types.NamespacedName{Name: proj.Name, Namespace: proj.Namespace}
 
@@ -1463,11 +1467,13 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 		Expect(err).NotTo(HaveOccurred())
 
 		sharedR = &ProjectionReconciler{
-			Client:        sharedMgr.GetClient(),
-			Scheme:        sharedMgr.GetScheme(),
-			DynamicClient: dynClient,
-			RESTMapper:    mapper,
-			Recorder:      events.NewFakeRecorder(256),
+			ControllerDeps: &ControllerDeps{
+				Client:        sharedMgr.GetClient(),
+				Scheme:        sharedMgr.GetScheme(),
+				DynamicClient: dynClient,
+				RESTMapper:    mapper,
+				Recorder:      events.NewFakeRecorder(256),
+			},
 		}
 		Expect(sharedR.SetupWithManager(sharedMgr)).To(Succeed())
 
@@ -1755,13 +1761,13 @@ var _ = Describe("watchedGvks metric", func() {
 		r := &ProjectionReconciler{
 			watched: map[schema.GroupVersionKind]bool{},
 		}
-		// Simulate two ensureWatch calls for different GVKs, then a duplicate.
+		// Simulate two ensureSourceWatch calls for different GVKs, then a duplicate.
 		r.watchedMu.Lock()
 		r.watched[schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}] = true
 		watchedGvks.Inc()
 		r.watched[schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"}] = true
 		watchedGvks.Inc()
-		// Duplicate: ensureWatch short-circuits before Inc, so no Inc here.
+		// Duplicate: ensureSourceWatch short-circuits before Inc, so no Inc here.
 		r.watchedMu.Unlock()
 
 		Expect(testutil.ToFloat64(watchedGvks)).To(Equal(2.0))

@@ -200,10 +200,12 @@ func main() {
 			"value", cfg.selectorWriteConcurrency)
 	}
 	if err = (&controller.ProjectionReconciler{
-		Client:                   mgr.GetClient(),
-		Scheme:                   mgr.GetScheme(),
-		DynamicClient:            dynamicClient,
-		RESTMapper:               mgr.GetRESTMapper(),
+		ControllerDeps: &controller.ControllerDeps{
+			Client:        mgr.GetClient(),
+			Scheme:        mgr.GetScheme(),
+			DynamicClient: dynamicClient,
+			RESTMapper:    mgr.GetRESTMapper(),
+		},
 		SourceMode:               sourceMode,
 		RequeueInterval:          cfg.requeueInterval,
 		SelectorWriteConcurrency: cfg.selectorWriteConcurrency,
