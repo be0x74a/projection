@@ -219,7 +219,7 @@ spec:
                 x-kubernetes-validations:
                 - message: version is required when group is empty (no unpinned form
                     for core)
-                  rule: self.group != '' || self.version != ''
+                  rule: size(self.group) != 0 || size(self.version) != 0
             required:
             - destination
             - source
