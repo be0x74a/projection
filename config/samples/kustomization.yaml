@@ -1,6 +1,6 @@
 ## Append samples of your project ##
 resources:
 - projection_v1_projection.yaml
-- projection_v1_projection_selector.yaml
 - projection_v1_projection_unpinned.yaml
+- projection_v1_clusterprojection.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

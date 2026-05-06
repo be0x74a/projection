@@ -20,18 +20,18 @@ spec:
     - jsonPath: .spec.source.kind
       name: Kind
       type: string
+    - jsonPath: .spec.source.group
+      name: Source-Group
+      priority: 1
+      type: string
     - jsonPath: .spec.source.namespace
       name: Source-Namespace
       type: string
     - jsonPath: .spec.source.name
       name: Source-Name
       type: string
-    - jsonPath: .spec.destination.name
+    - jsonPath: .status.destinationName
       name: Destination
-      type: string
-    - jsonPath: .spec.destination.namespaceSelector.matchLabels
-      name: Destination-Selector
-      priority: 1
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
@@ -42,12 +42,8 @@ spec:
     name: v1
     schema:
       openAPIV3Schema:
-        description: |-
-          Projection mirrors one Kubernetes object from a source location to one or
-          more destination namespaces, declaratively and conflict-safely. Source
-          edits propagate to destinations in ~100 ms via dynamic watches. Destinations
-          carry a projection.sh/owned-by annotation the controller uses to
-          refuse overwriting resources it did not create.
+        description: Projection mirrors one source object into the Projection's own
+          namespace.
         properties:
           apiVersion:
             description: |-
@@ -68,79 +64,27 @@ spec:
             type: object
           spec:
             description: |-
-              ProjectionSpec specifies which source object to mirror, where to write it,
-              and what metadata overlays to apply.
+              ProjectionSpec is the desired state of a namespaced Projection.
+
+              A Projection mirrors one source object into the Projection's own namespace.
+              It cannot write outside its own namespace — that is what ClusterProjection
+              is for. This narrowness is deliberate: it makes namespace-scoped RBAC on
+              `projections.projection.sh` a structural confinement, not a policy hint.
             properties:
               destination:
-                description: Destination controls where the projected object is written.
+                description: |-
+                  Destination optionally renames the destination. The destination
+                  namespace is implicitly the Projection's own namespace and cannot
+                  be set; for cross-namespace mirroring use ClusterProjection.
                 properties:
                   name:
                     description: |-
-                      Name in the destination namespace. Defaults to Source.Name. DNS-1123
-                      subdomain: lowercase alphanumerics, '-', and '.', up to 253 chars.
+                      Name in the destination namespace (DNS-1123 subdomain). Defaults to
+                      Source.Name when empty.
                     maxLength: 253
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
-                  namespace:
-                    description: |-
-                      Namespace to project into. Defaults to the Projection's own namespace.
-                      Mutually exclusive with NamespaceSelector.
-                    maxLength: 63
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                    type: string
-                  namespaceSelector:
-                    description: |-
-                      NamespaceSelector selects namespaces to project into by label.
-                      Mutually exclusive with Namespace.
-                    properties:
-                      matchExpressions:
-                        description: matchExpressions is a list of label selector
-                          requirements. The requirements are ANDed.
-                        items:
-                          description: |-
-                            A label selector requirement is a selector that contains values, a key, and an operator that
-                            relates the key and values.
-                          properties:
-                            key:
-                              description: key is the label key that the selector
-                                applies to.
-                              type: string
-                            operator:
-                              description: |-
-                                operator represents a key's relationship to a set of values.
-                                Valid operators are In, NotIn, Exists and DoesNotExist.
-                              type: string
-                            values:
-                              description: |-
-                                values is an array of string values. If the operator is In or NotIn,
-                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                                the values array must be empty. This array is replaced during a strategic
-                                merge patch.
-                              items:
-                                type: string
-                              type: array
-                              x-kubernetes-list-type: atomic
-                          required:
-                          - key
-                          - operator
-                          type: object
-                        type: array
-                        x-kubernetes-list-type: atomic
-                      matchLabels:
-                        additionalProperties:
-                          type: string
-                        description: |-
-                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                          map is equivalent to an element of matchExpressions, whose key field is "key", the
-                          operator is "In", and the values array contains only "value". The requirements are ANDed.
-                        type: object
-                    type: object
-                    x-kubernetes-map-type: atomic
                 type: object
-                x-kubernetes-validations:
-                - message: destination.namespace and destination.namespaceSelector
-                    are mutually exclusive
-                  rule: '!(has(self.namespace) && has(self.namespaceSelector))'
               overlay:
                 description: Overlay applies metadata patches on top of the projected
                   object.
@@ -149,78 +93,67 @@ spec:
                     additionalProperties:
                       type: string
                     description: |-
-                      Annotations are merged with the source object's metadata.annotations
-                      before writing to the destination. Keys set here win on conflict
-                      with source annotations. Note: the controller always overwrites
-                      projection.sh/owned-by to its own bookkeeping value;
-                      attempts to set it here are ignored.
+                      Annotations are merged onto the destination's metadata.annotations.
+                      Same overlay-wins merge rule as Labels.
                     type: object
                   labels:
                     additionalProperties:
                       type: string
                     description: |-
-                      Labels are merged with the source object's metadata.labels before
-                      writing to the destination. Keys set here win on conflict with
-                      source labels.
+                      Labels are merged onto the destination's metadata.labels. Overlay
+                      entries win on key conflicts with the source (overlay-last semantics);
+                      source-only and overlay-only keys are kept as-is.
                     type: object
                 type: object
               source:
-                description: Source is the object to project from.
+                description: Source identifies the object to project.
                 properties:
-                  apiVersion:
+                  group:
                     description: |-
-                      APIVersion of the source object. Three forms accepted:
-                        - "v1"      — core group, pinned to v1.
-                        - "apps/v1" — named group, pinned to v1.
-                        - "apps/*"  — named group, RESTMapper-preferred served version.
-                      The unpinned form follows the cluster: when a CRD author promotes
-                      v1beta1→v1, projection picks up the new preferred version on the
-                      next reconcile rather than reporting SourceResolutionFailed.
-                      The "*" sentinel is invalid without a group prefix (no "*" form
-                      for the core group, which has stable versions); enforced in the
-                      reconciler since the regex is permissive for simplicity.
-                    minLength: 1
-                    pattern: ^([a-z0-9.-]+/)?(v[0-9]+((alpha|beta)[0-9]+)?|\*)$
+                      Group is the API group of the source object. Empty string means the
+                      core group (e.g. ConfigMap, Secret, Service).
+                    pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   kind:
-                    description: Kind of the source object, e.g. "ConfigMap".
-                    minLength: 1
-                    pattern: ^[A-Z][A-Za-z0-9]*$
+                    description: Kind is the API Kind of the source object (PascalCase).
+                    pattern: ^[A-Z][a-zA-Z0-9]*$
                     type: string
                   name:
-                    description: |-
-                      Name of the source object. DNS-1123 subdomain: lowercase alphanumerics,
-                      '-', and '.', up to 253 chars. Matches the permissive form Kubernetes
-                      uses for most named objects (ConfigMap, Secret, Deployment, Pod, …).
+                    description: Name of the source object (DNS-1123 subdomain).
                     maxLength: 253
-                    minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   namespace:
-                    description: Namespace of the source object.
+                    description: Namespace where the source object lives.
                     maxLength: 63
-                    minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                     type: string
+                  version:
+                    description: |-
+                      Version is the API version of the source object within its Group. Omit
+                      for non-core groups to use the RESTMapper's preferred served version
+                      (the source automatically follows CRD version promotions). When set,
+                      must match Kubernetes' canonical version-string shape (`vN`,
+                      `vNalphaM`, `vNbetaM`).
+                    pattern: ^$|^v[0-9]+((alpha|beta)[0-9]+)?$
+                    type: string
                 required:
-                - apiVersion
                 - kind
                 - name
                 - namespace
                 type: object
+                x-kubernetes-validations:
+                - message: version is required when group is empty (no unpinned form
+                    for core)
+                  rule: self.group != '' || self.version != ''
             required:
             - source
             type: object
           status:
-            description: |-
-              ProjectionStatus reports the most recent reconcile outcome via three
-              conditions: SourceResolved, DestinationWritten, and Ready.
+            description: ProjectionStatus reports the most recent reconcile outcome.
             properties:
               conditions:
-                description: |-
-                  Conditions reflect the current state of the projection. The controller
-                  sets type "Ready" to True once the destination has been written, or
-                  False with a reason describing why not.
+                description: 'Conditions: SourceResolved, DestinationWritten, Ready.'
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -276,6 +209,13 @@ spec:
                   - type
                   type: object
                 type: array
+              destinationName:
+                description: |-
+                  DestinationName is the resolved name of the destination object after
+                  applying any rename override (`spec.destination.name`) or defaulting to
+                  `spec.source.name`. Populated by the controller after a successful
+                  write; empty before the first reconcile completes.
+                type: string
             type: object
         type: object
     served: true

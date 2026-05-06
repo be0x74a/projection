@@ -1,13 +1,14 @@
 apiVersion: projection.sh/v1
-kind: Projection
+kind: ClusterProjection
 metadata:
   labels:
     app.kubernetes.io/name: projection
     app.kubernetes.io/managed-by: kustomize
-  name: projection-selector-sample
+  name: clusterprojection-sample
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: shared-config
     namespace: config-source
