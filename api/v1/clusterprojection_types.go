@@ -48,9 +48,11 @@ type ClusterProjectionSpec struct {
 // +kubebuilder:validation:XValidation:rule="has(self.namespaces) || has(self.namespaceSelector)",message="one of namespaces or namespaceSelector must be set"
 type ClusterProjectionDestination struct {
 	// Namespaces is an explicit list of destination namespaces. Mutually
-	// exclusive with NamespaceSelector. Each entry is a DNS-1123 label.
+	// exclusive with NamespaceSelector. Each entry is a DNS-1123 label;
+	// at least one entry is required when this field is set.
 	// +optional
 	// +listType=set
+	// +kubebuilder:validation:MinItems=1
 	Namespaces []string `json:"namespaces,omitempty"`
 
 	// NamespaceSelector picks destination namespaces by label. Mutually

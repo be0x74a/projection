@@ -144,9 +144,11 @@ spec:
                   namespaces:
                     description: |-
                       Namespaces is an explicit list of destination namespaces. Mutually
-                      exclusive with NamespaceSelector. Each entry is a DNS-1123 label.
+                      exclusive with NamespaceSelector. Each entry is a DNS-1123 label;
+                      at least one entry is required when this field is set.
                     items:
                       type: string
+                    minItems: 1
                     type: array
                     x-kubernetes-list-type: set
                 type: object
