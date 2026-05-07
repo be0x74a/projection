@@ -4,6 +4,10 @@
 # (workflow-link callout). The marker line is required at the top of both —
 # the workflow uses it to find an existing comment to update.
 #
+# The smoke comment intentionally only surfaces source-update numbers — the
+# headline event for a per-PR check. Self-heal and ns-flip distributions are
+# tracked in bench.json but kept out of this comment to avoid noise.
+#
 # Args:
 #   $1: path to bench.json (may be missing or empty on failure)
 #   $2: short commit SHA
@@ -90,38 +94,38 @@ if [ "$CPLIST_COUNT" -gt 0 ]; then
 fi
 [ -z "$PROFILE_DESC" ] && PROFILE_DESC="(no shapes set — empty profile?)"
 
-NP_SAMPLES=$(n measurements.e2e_np_samples)
-NP_P50=$(ms measurements.e2e_np_p50_ns)
-NP_P95=$(ms measurements.e2e_np_p95_ns)
-NP_P99=$(ms measurements.e2e_np_p99_ns)
+NP_SAMPLES=$(n measurements.e2e_np_source_update_samples)
+NP_P50=$(ms measurements.e2e_np_source_update_p50_ns)
+NP_P95=$(ms measurements.e2e_np_source_update_p95_ns)
+NP_P99=$(ms measurements.e2e_np_source_update_p99_ns)
 
-CPSEL_SAMPLES=$(n measurements.e2e_cp_sel_samples)
-CPSEL_E_P50=$(ms measurements.e2e_cp_sel_earliest_p50_ns)
-CPSEL_E_P95=$(ms measurements.e2e_cp_sel_earliest_p95_ns)
-CPSEL_E_P99=$(ms measurements.e2e_cp_sel_earliest_p99_ns)
-CPSEL_S_P50=$(ms measurements.e2e_cp_sel_slowest_p50_ns)
-CPSEL_S_P95=$(ms measurements.e2e_cp_sel_slowest_p95_ns)
-CPSEL_S_P99=$(ms measurements.e2e_cp_sel_slowest_p99_ns)
+CPSEL_SAMPLES=$(n measurements.e2e_cp_sel_source_update_samples)
+CPSEL_E_P50=$(ms measurements.e2e_cp_sel_source_update_earliest_p50_ns)
+CPSEL_E_P95=$(ms measurements.e2e_cp_sel_source_update_earliest_p95_ns)
+CPSEL_E_P99=$(ms measurements.e2e_cp_sel_source_update_earliest_p99_ns)
+CPSEL_S_P50=$(ms measurements.e2e_cp_sel_source_update_slowest_p50_ns)
+CPSEL_S_P95=$(ms measurements.e2e_cp_sel_source_update_slowest_p95_ns)
+CPSEL_S_P99=$(ms measurements.e2e_cp_sel_source_update_slowest_p99_ns)
 
-CPLIST_SAMPLES=$(n measurements.e2e_cp_list_samples)
-CPLIST_E_P50=$(ms measurements.e2e_cp_list_earliest_p50_ns)
-CPLIST_E_P95=$(ms measurements.e2e_cp_list_earliest_p95_ns)
-CPLIST_E_P99=$(ms measurements.e2e_cp_list_earliest_p99_ns)
-CPLIST_S_P50=$(ms measurements.e2e_cp_list_slowest_p50_ns)
-CPLIST_S_P95=$(ms measurements.e2e_cp_list_slowest_p95_ns)
-CPLIST_S_P99=$(ms measurements.e2e_cp_list_slowest_p99_ns)
+CPLIST_SAMPLES=$(n measurements.e2e_cp_list_source_update_samples)
+CPLIST_E_P50=$(ms measurements.e2e_cp_list_source_update_earliest_p50_ns)
+CPLIST_E_P95=$(ms measurements.e2e_cp_list_source_update_earliest_p95_ns)
+CPLIST_E_P99=$(ms measurements.e2e_cp_list_source_update_earliest_p99_ns)
+CPLIST_S_P50=$(ms measurements.e2e_cp_list_source_update_slowest_p50_ns)
+CPLIST_S_P95=$(ms measurements.e2e_cp_list_source_update_slowest_p95_ns)
+CPLIST_S_P99=$(ms measurements.e2e_cp_list_source_update_slowest_p99_ns)
 
 cat <<EOF
 <!-- bench-smoke -->
 ## Bench smoke — \`$PROFILE_NAME\`
 
-End-to-end latency from a 2-vCPU GHA runner. Treat absolute numbers as a sanity check, not a perf claim — runner noise is high. The point of this check is to catch shape-break regressions on \`api/v1\` / controller / bench changes before merge.
+End-to-end source-update latency from a 2-vCPU GHA runner. Treat absolute numbers as a sanity check, not a perf claim — runner noise is high. The point of this check is to catch shape-break regressions on \`api/v1\` / controller / bench changes before merge. (Self-heal and ns-flip distributions are recorded in \`bench.json\` but omitted here for signal-to-noise.)
 
 ### Profile
 
 $PROFILE_DESC, layered in one bootstrap.
 
-### Results
+### Results — source-update latency
 
 | Path | Samples | p50 | p95 | p99 |
 |---|---|---|---|---|
