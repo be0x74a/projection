@@ -12,6 +12,9 @@
 # Output: markdown to stdout. Exits non-zero only on missing args.
 
 set -euo pipefail
+# Numeric formatting in awk's printf honors LC_NUMERIC — pin C so "1.5ms"
+# doesn't become "1,5ms" on a comma-decimal runner locale.
+export LC_ALL=C
 
 if [ "$#" -lt 3 ]; then
   echo "usage: $0 <bench.json|''> <short-sha> <run-url>" >&2
@@ -67,6 +70,26 @@ n() {
 PROFILE_NAME=$(jq -r '.profile.Name // "mixed-typical"' "$BENCH_JSON")
 DURATION=$(jq -r '.duration_seconds // 0 | floor | tostring' "$BENCH_JSON")
 
+# Profile-shape sentence: read counts from JSON so non-mixed profiles
+# (np-typical only, etc.) describe themselves correctly. Skip shapes
+# whose count is 0 to avoid "0 CP-selector destinations" awkwardness.
+NP_COUNT=$(jq -r '.profile.NamespacedProjections // 0' "$BENCH_JSON")
+CPSEL_COUNT=$(jq -r '.profile.SelectorNamespaces // 0' "$BENCH_JSON")
+CPLIST_COUNT=$(jq -r '.profile.ListNamespaces // 0' "$BENCH_JSON")
+PROFILE_DESC=""
+if [ "$NP_COUNT" -gt 0 ]; then
+  PROFILE_DESC="$NP_COUNT namespaced Projections"
+fi
+if [ "$CPSEL_COUNT" -gt 0 ]; then
+  [ -n "$PROFILE_DESC" ] && PROFILE_DESC+=" + "
+  PROFILE_DESC+="$CPSEL_COUNT CP-selector destinations"
+fi
+if [ "$CPLIST_COUNT" -gt 0 ]; then
+  [ -n "$PROFILE_DESC" ] && PROFILE_DESC+=" + "
+  PROFILE_DESC+="$CPLIST_COUNT CP-list destinations"
+fi
+[ -z "$PROFILE_DESC" ] && PROFILE_DESC="(no shapes set — empty profile?)"
+
 NP_SAMPLES=$(n measurements.e2e_np_samples)
 NP_P50=$(ms measurements.e2e_np_p50_ns)
 NP_P95=$(ms measurements.e2e_np_p95_ns)
@@ -96,7 +119,7 @@ End-to-end latency from a 2-vCPU GHA runner. Treat absolute numbers as a sanity 
 
 ### Profile
 
-100 namespaced Projections + 50 CP-selector destinations + 10 CP-list destinations, layered in one bootstrap.
+$PROFILE_DESC, layered in one bootstrap.
 
 ### Results
 

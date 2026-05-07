@@ -110,16 +110,28 @@ jobs:
           # Find an existing bench-smoke comment by its hidden marker, then
           # PATCH it; otherwise create a new one. Avoids a third-party action
           # (Scorecard requires SHA pin + review for any new dep).
-          # `awk NR==1{print}` reads to EOF rather than closing the pipe early
-          # — `head -1` would SIGPIPE gh under bash's default pipefail.
+          #
+          # `select(.body != null)` guards against bot/integration comments
+          # that have produced null bodies in the wild — without it, jq's
+          # startswith() errors and the workflow fails.
+          #
+          # `awk NR==1{print}` reads to EOF rather than closing the pipe early.
+          # `head -1` would SIGPIPE the upstream `gh` once it has its line,
+          # exiting 141 — visible as a step failure under `set -e`.
           existing=$(gh api "/repos/$REPO/issues/$PR/comments" --paginate \
-            --jq '.[] | select(.body | startswith("<!-- bench-smoke -->")) | .id' \
+            --jq '.[] | select(.body != null) | select(.body | startswith("<!-- bench-smoke -->")) | .id' \
             | awk 'NR==1 { print }')
-          if [ -n "$existing" ]; then
-            gh api -X PATCH "/repos/$REPO/issues/comments/$existing" -F body=@comment.md
-          else
-            gh pr comment "$PR" --body-file comment.md
-          fi
+          # Wrap the post in a graceful warning so fork PRs (where
+          # GITHUB_TOKEN is forced read-only by GitHub regardless of the
+          # workflow's declared write permission) don't show as failed
+          # smoke checks. The bench artifact is still uploaded for review.
+          {
+            if [ -n "$existing" ]; then
+              gh api -X PATCH "/repos/$REPO/issues/comments/$existing" -F body=@comment.md
+            else
+              gh pr comment "$PR" --body-file comment.md
+            fi
+          } || echo "::warning::Comment post failed (fork PR with read-only token, or transient API error). See uploaded bench.json artifact."
 
       - name: Upload bench artifact
         if: always()
