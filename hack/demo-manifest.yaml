@@ -1,3 +1,7 @@
+---
+# --- Act 1: namespace-tier mirroring (Projection) ---
+# Source lives in staging; destination IS the Projection's own namespace
+# (production), so the Projection itself is created in production.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -23,12 +27,64 @@ apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: app-config-mirror
-  namespace: staging
+  namespace: production
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     namespace: staging
     name: app-config
+---
+# --- Act 2: cluster-tier fan-out (ClusterProjection, explicit-list) ---
+# One source ConfigMap fans out into three tenant namespaces. ClusterProjection
+# is cluster-scoped (no metadata.namespace).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-b
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-c
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ca-bundle
+  namespace: platform
+  annotations:
+    projection.sh/projectable: "true"
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    (truncated for demo)
+    -----END CERTIFICATE-----
+---
+apiVersion: projection.sh/v1
+kind: ClusterProjection
+metadata:
+  name: ca-bundle-fanout
+spec:
+  source:
+    group: ""
+    version: v1
+    kind: ConfigMap
+    namespace: platform
+    name: ca-bundle
   destination:
-    namespace: production
+    namespaces:
+      - tenant-a
+      - tenant-b
+      - tenant-c
