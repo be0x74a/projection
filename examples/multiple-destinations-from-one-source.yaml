@@ -1,14 +1,14 @@
-# Mirror one source into multiple destinations, one Projection per target.
+# Mirror one source into multiple destinations with per-namespace overlays.
 #
-# This pattern is preferred when each destination needs a *distinct overlay*
-# (here: a different `tenant:` label). For uniform fan-out (same overlay
-# everywhere) use `destination.namespaceSelector` — see
-# `configmap-fan-out-selector.yaml` — which covers all matching namespaces
-# with a single Projection and a rollup status.
+# When destinations need DIFFERENT overlays per namespace, co-locate one
+# Projection per namespace — each Projection lives in its destination
+# namespace and carries its own overlay (here: a different `tenant:` label
+# in each tenant). ClusterProjection is for the same overlay across many
+# namespaces; this pattern is for differentiated overlays.
 #
-# With one Projection per destination you still get per-destination status
-# independently (one DestinationConflict in tenant-c won't mark the others
-# as failed), at the cost of more YAML.
+# You also get per-destination status independently: a DestinationConflict
+# in tenant-c won't mark the others as failed. The cost is more YAML — and
+# requiring write authority in each destination namespace.
 ---
 apiVersion: v1
 kind: Namespace
@@ -40,47 +40,44 @@ data:
 apiVersion: projection.sh/v1
 kind: Projection
 metadata:
-  name: org-policy-tenant-a
-  namespace: platform
+  name: org-policy
+  namespace: tenant-a
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: org-policy
     namespace: platform
-  destination:
-    namespace: tenant-a
   overlay:
     labels: {tenant: tenant-a}
 ---
 apiVersion: projection.sh/v1
 kind: Projection
 metadata:
-  name: org-policy-tenant-b
-  namespace: platform
+  name: org-policy
+  namespace: tenant-b
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: org-policy
     namespace: platform
-  destination:
-    namespace: tenant-b
   overlay:
     labels: {tenant: tenant-b}
 ---
 apiVersion: projection.sh/v1
 kind: Projection
 metadata:
-  name: org-policy-tenant-c
-  namespace: platform
+  name: org-policy
+  namespace: tenant-c
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: org-policy
     namespace: platform
-  destination:
-    namespace: tenant-c
   overlay:
     labels: {tenant: tenant-c}

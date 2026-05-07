@@ -1,9 +1,9 @@
 # Apply overlay labels to the destination.
 #
 # The overlay is merged on top of the source's labels. Where keys collide,
-# the overlay wins. Use this to tag mirrored objects with the consuming
-# tenant, the owning team, or anything else that distinguishes a mirrored
-# copy from its source.
+# the overlay wins (overlay-last). Use this to tag mirrored objects with
+# the consuming tenant, the owning team, or anything else that distinguishes
+# a mirrored copy from its source.
 #
 # Result: the destination ConfigMap will have:
 #   labels:
@@ -34,15 +34,14 @@ apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: shared-config-tenant-a
-  namespace: platform
+  namespace: tenant-a
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: shared-config
     namespace: platform
-  destination:
-    namespace: tenant-a
   overlay:
     labels:
       projected-by: projection

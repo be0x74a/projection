@@ -1,14 +1,18 @@
 # Fan out one ConfigMap into every namespace labeled for mirroring.
 #
+# This uses a cluster-scoped ClusterProjection — the right resource for
+# "one source, many destinations". Creating a ClusterProjection requires
+# cluster-admin authority; the chart does NOT aggregate the
+# `clusterprojections` CRUD verbs into the built-in `admin`/`edit` roles.
+#
 # After applying this file:
-#   kubectl get projections
+#   kubectl get clusterprojections
 #   kubectl get configmap -A -l projected-by=projection
 #
 # Label a new namespace with projection.sh/mirror=true and the
 # destination appears there too; remove the label and it's cleaned up.
-# This is the recommended pattern for "one source, many destinations" —
-# one Projection covers every matching namespace, with a DestinationWritten
-# rollup condition and per-namespace Events.
+# One ClusterProjection covers every matching namespace, with a
+# DestinationWritten rollup condition and per-namespace Events.
 ---
 apiVersion: v1
 kind: Namespace
@@ -46,13 +50,13 @@ data:
   feature_flag: enabled
 ---
 apiVersion: projection.sh/v1
-kind: Projection
+kind: ClusterProjection
 metadata:
   name: app-config-fanout
-  namespace: default
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: app-config
     namespace: default

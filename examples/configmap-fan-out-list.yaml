@@ -1,0 +1,86 @@
+# Fan out one ConfigMap into a fixed, hand-picked set of namespaces.
+#
+# Like configmap-fan-out-selector.yaml, this uses a cluster-scoped
+# ClusterProjection — but instead of matching namespaces by label, it
+# enumerates them explicitly via spec.destination.namespaces. Creating a
+# ClusterProjection requires cluster-admin authority; the chart does NOT
+# aggregate the `clusterprojections` CRUD verbs into the built-in
+# `admin`/`edit` roles.
+#
+# Pick this shape over a selector when:
+#   - The destination set is small, stable, and known up-front.
+#   - You want the destination set to be reviewable in code (the YAML
+#     itself documents who gets the copy) without depending on namespace
+#     labels that someone else owns.
+#   - Adding/removing a tenant should be a deliberate edit + apply, not a
+#     side-effect of a label flip somewhere else in the cluster.
+#
+# Pick the selector shape (configmap-fan-out-selector.yaml) instead when:
+#   - The destination set should auto-grow as new namespaces are created.
+#   - Tenants self-serve onto the mirror by labeling their own namespace.
+#
+# `namespaces` and `namespaceSelector` are mutually exclusive (CEL admission
+# rule on the CRD); set exactly one. The list must contain at least one
+# entry — `namespaces: []` is rejected by `minItems=1` on the schema.
+#
+# After applying this file:
+#   kubectl get clusterprojections
+#   kubectl get configmap -n tenant-a app-config
+#   kubectl get configmap -n tenant-b app-config
+#   kubectl get configmap -n tenant-c app-config
+#
+# Editing the namespaces list and reapplying will fan out to any new
+# entries on the next reconcile and clean up destinations dropped from
+# the list (the controller tracks which namespaces it owns via the
+# `projection.sh/owned-by-cluster-projection` annotation).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-b
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-c
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+  annotations:
+    # Source owner opts this ConfigMap in to projection. Required under the
+    # default allowlist source-mode; harmless in permissive mode. Setting
+    # this to "false" is always honored as an opt-out veto.
+    projection.sh/projectable: "true"
+data:
+  log_level: info
+  feature_flag: enabled
+---
+apiVersion: projection.sh/v1
+kind: ClusterProjection
+metadata:
+  name: app-config-fanout
+spec:
+  source:
+    group: ""
+    version: v1
+    kind: ConfigMap
+    name: app-config
+    namespace: default
+  destination:
+    namespaces:
+      - tenant-a
+      - tenant-b
+      - tenant-c
+    # name omitted → defaults to source.name ("app-config") in each
+    # listed namespace.
+  overlay:
+    labels:
+      projected-by: projection
