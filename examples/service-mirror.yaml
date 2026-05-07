@@ -1,5 +1,8 @@
 # Mirror a Service across namespaces.
 #
+# The Projection lives in the destination namespace (`team-b`) and reads
+# the source Service out of `default`.
+#
 # This demonstrates Kind-aware stripping: the source Service's clusterIP
 # is allocated by the apiserver. If projection naively copied it, the
 # create at the destination would fail with "spec.clusterIP: field is
@@ -37,12 +40,11 @@ apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: api-into-team-b
-  namespace: default
+  namespace: team-b
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: Service
     name: api
     namespace: default
-  destination:
-    namespace: team-b
