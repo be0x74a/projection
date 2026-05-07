@@ -37,6 +37,12 @@ const (
 	kindClusterProjection = "ClusterProjection"
 )
 
+// Event label values for e2eSeconds. v0.3.0 emits "create" only; future minor
+// releases may additively introduce "source-update", "self-heal",
+// "ns-flip-add", "ns-flip-cleanup". Per docs/api-stability.md, additive label
+// values on existing pre-v1.0 metrics are an expected evolution.
+const eventCreate = "create"
+
 // reconcileTotal counts reconcile outcomes partitioned by CR kind
 // (Projection / ClusterProjection) and result bucket. Registered on
 // controller-runtime's global metrics registry so it is exposed automatically
@@ -71,6 +77,26 @@ var watchedDestGvks = prometheus.NewGauge(
 	},
 )
 
+// e2eSeconds is the wall-clock latency from a Projection or
+// ClusterProjection's metadata.creationTimestamp to the first successful
+// destination Create. Companion to the bench harness in test/bench/, which
+// measures the same observation externally — exposing it as a controller
+// metric lets production dashboards read what the bench reports.
+//
+// The `event` label is reserved for additive values in future releases (e.g.
+// "source-update", "self-heal", "ns-flip-add", "ns-flip-cleanup"); v0.3.0
+// emits "create" only. Buckets are locked at v1.0 and span 5ms..30s — sized
+// for the typical create-path floor of a few-tens-of-ms through the slow
+// end of multi-second apiserver-throttled reconciles.
+var e2eSeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "projection_e2e_seconds",
+		Help:    "End-to-end latency from CR creationTimestamp to first successful destination Create.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+	},
+	[]string{"kind", "event"},
+)
+
 func init() {
-	metrics.Registry.MustRegister(reconcileTotal, watchedGvks, watchedDestGvks)
+	metrics.Registry.MustRegister(reconcileTotal, watchedGvks, watchedDestGvks, e2eSeconds)
 }

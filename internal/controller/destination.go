@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -333,6 +334,12 @@ func (d *ControllerDeps) writeDestination(
 			d.emit(proj, corev1.EventTypeWarning, "DestinationCreateFailed", "Create", createErr.Error())
 			return "DestinationCreateFailed", createErr.Error()
 		}
+		// Observe e2e latency only on first-create success — Update,
+		// not-found-but-create-failed, and steady-state no-ops are excluded by
+		// design so the histogram reflects the create-event distribution
+		// directly comparable to the test/bench/ harness.
+		e2eSeconds.WithLabelValues(kindProjection, eventCreate).
+			Observe(time.Since(proj.GetCreationTimestamp().Time).Seconds())
 		d.emit(proj, corev1.EventTypeNormal, "Projected", "Create",
 			fmt.Sprintf("projected %s %s/%s to %s/%s",
 				source.GroupVersionKind().String(),
@@ -398,6 +405,12 @@ func (d *ControllerDeps) writeClusterDestination(
 				fmt.Sprintf("%s/%s: %s", dst.GetNamespace(), dst.GetName(), createErr.Error()))
 			return "DestinationCreateFailed", createErr.Error()
 		}
+		// One observation per per-namespace successful Create. Selector or
+		// explicit-list ClusterProjections fanning out to N namespaces yield
+		// N observations on the first reconcile that lands a destination in
+		// each namespace.
+		e2eSeconds.WithLabelValues(kindClusterProjection, eventCreate).
+			Observe(time.Since(cp.GetCreationTimestamp().Time).Seconds())
 		d.emit(cp, corev1.EventTypeNormal, "Projected", "Create",
 			fmt.Sprintf("projected %s %s/%s to %s/%s",
 				source.GroupVersionKind().String(),
