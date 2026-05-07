@@ -1,19 +1,42 @@
 # projection
 
 A Helm chart for the [projection](https://github.com/projection-operator/projection)
-Kubernetes operator. Projection is a CRD for declarative mirroring of Kubernetes
-resources across namespaces.
+Kubernetes operator. Projection ships two CustomResourceDefinitions for declarative
+mirroring of Kubernetes resources:
+
+- **`Projection`** (namespaced, single-target) — mirrors one source object into the
+  Projection's own `metadata.namespace`. Cannot write outside its own namespace, so
+  namespace-scoped RBAC on `projections.projection.sh` is a structural confinement,
+  not a policy hint.
+- **`ClusterProjection`** (cluster-scoped, fan-out) — mirrors one source object into
+  many destination namespaces, selected by an explicit list (`spec.destination.namespaces`)
+  or a label selector (`spec.destination.namespaceSelector`). Creating one requires
+  cluster-tier authority (see `rbac.aggregate` below).
 
 ## What this chart installs
 
-- The `Projection` CustomResourceDefinition (first install only; see CRD
-  lifecycle note below).
+- The `Projection` and `ClusterProjection` CustomResourceDefinitions (first install
+  only; see CRD lifecycle note below).
 - A cluster-scoped controller Deployment running the `projection` manager.
 - A ServiceAccount plus a ClusterRole / ClusterRoleBinding granting the
   controller the privileges it needs to mirror resource Kinds. The set of
   Kinds the controller may touch is governed by the `supportedKinds` value
   (defaults to `*/*` for backwards-compatibility; narrow it for regulated
   clusters — see [docs/security.md](../../docs/security.md)).
+- **End-user-facing RBAC** (`rbac.aggregate=true` by default):
+  - `<release>-projection-namespaced-edit` ClusterRole — aggregates into the
+    cluster-default `admin` and `edit` roles, granting namespace tenants
+    `create`/`update`/`delete`/`patch` on `projections.projection.sh` in their
+    own namespaces. Read-only access to `clusterprojections.projection.sh` is
+    also included so tenants can `kubectl describe` cluster-scoped fan-outs
+    that target their namespace.
+  - `<release>-projection-namespaced-view` ClusterRole — aggregates into the
+    cluster-default `view` role, granting namespace tenants read-only access
+    to `projections.projection.sh` and `clusterprojections.projection.sh`.
+  - `<release>-projection-cluster-admin` ClusterRole — full CRUD on
+    `clusterprojections.projection.sh`. NOT aggregated; bind explicitly via
+    ClusterRoleBinding to operators who manage cluster-scoped fan-out.
+    Always rendered regardless of the `rbac.aggregate` toggle.
 - A namespaced Role / RoleBinding for leader election (leases + events) in the
   release namespace.
 - A ClusterIP Service exposing Prometheus metrics on port 8443 (HTTPS,
@@ -42,7 +65,7 @@ Override the image for local / air-gapped deployments:
 helm install projection charts/projection \
   --namespace projection-system --create-namespace \
   --set image.repository=my-registry/projection \
-  --set image.tag=v0.2.0
+  --set image.tag=v0.3.0
 ```
 
 ## Upgrade
@@ -52,10 +75,11 @@ helm upgrade projection charts/projection --namespace projection-system
 ```
 
 Note: Helm will NOT update CRDs on upgrade. If the CRD schema has changed
-between chart versions you must apply the new CRD manually:
+between chart versions you must apply the new CRDs manually:
 
 ```shell
 kubectl apply -f charts/projection/crds/projections.projection.sh.yaml
+kubectl apply -f charts/projection/crds/clusterprojections.projection.sh.yaml
 ```
 
 ## Uninstall
@@ -64,11 +88,11 @@ kubectl apply -f charts/projection/crds/projections.projection.sh.yaml
 helm uninstall projection --namespace projection-system
 ```
 
-The CRD is intentionally left behind to protect any existing `Projection`
-custom resources. To remove it:
+The CRDs are intentionally left behind to protect any existing `Projection`
+or `ClusterProjection` custom resources. To remove them:
 
 ```shell
-kubectl delete crd projections.projection.sh
+kubectl delete crd projections.projection.sh clusterprojections.projection.sh
 ```
 
 ## CRD lifecycle
@@ -106,6 +130,7 @@ multiple releases.
 | `serviceAccount.create`             | `true`                        | Create a dedicated ServiceAccount.                                          |
 | `serviceAccount.name`               | `""`                          | Override generated ServiceAccount name.                                     |
 | `serviceAccount.annotations`        | `{}`                          | Annotations for the ServiceAccount (e.g. IRSA).                            |
+| `rbac.aggregate`                    | `true`                        | Render the `<release>-projection-namespaced-edit` and `<release>-projection-namespaced-view` ClusterRoles with aggregation labels so the cluster-default `admin`/`edit`/`view` roles automatically gain `Projection`/`ClusterProjection` access for namespace tenants. The `<release>-projection-cluster-admin` ClusterRole (for `ClusterProjection` CRUD) is rendered regardless of this flag and must be bound explicitly. |
 | `crds.install`                      | `true`                        | Documentation flag — Helm always installs `crds/` on first install.         |
 | `serviceMonitor.enabled`            | `false`                       | Render a ServiceMonitor selecting the metrics Service. Requires `monitoring.coreos.com/v1`. |
 | `serviceMonitor.interval`           | `30s`                         | Scrape interval for the ServiceMonitor.                                     |
@@ -136,7 +161,13 @@ Editors with JSON-schema support also pick this up. For VS Code with `redhat.vsc
 
 Schema strictness is pragmatic: top-level and chart-defined nested keys are locked down (`additionalProperties: false`) so typos surface early; pass-through Kubernetes shapes (`nodeSelector`, `tolerations`, `affinity`, `securityContext.{pod,container}` contents, `networkPolicy.extraEgress[]`, `serviceMonitor.tlsConfig`) stay opaque — the API server validates those authoritatively.
 
-## Example
+## Examples
+
+### Namespaced single-target mirror (`Projection`)
+
+A `Projection` always writes into its own `metadata.namespace`. The example below
+mirrors `default/source-cm` into `team-a/greeting` by placing the Projection in
+`team-a`:
 
 ```yaml
 apiVersion: v1
@@ -155,14 +186,44 @@ apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: mirror-greeting
-  namespace: default
+  namespace: team-a
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: source-cm
     namespace: default
   destination:
-    namespace: team-a
     name: greeting
 ```
+
+### Cluster-scoped fan-out (`ClusterProjection`)
+
+A `ClusterProjection` mirrors one source into many namespaces, picked by label
+selector or by an explicit `namespaces` list. The two are mutually exclusive
+(CEL admission); set exactly one.
+
+```yaml
+apiVersion: projection.sh/v1
+kind: ClusterProjection
+metadata:
+  name: mirror-greeting-fanout
+spec:
+  source:
+    group: ""
+    version: v1
+    kind: ConfigMap
+    name: source-cm
+    namespace: default
+  destination:
+    namespaceSelector:
+      matchLabels:
+        projection.sh/mirror: "true"
+  overlay:
+    labels:
+      projected-by: projection
+```
+
+More example shapes — including explicit-list fan-out, overlays, and
+non-ConfigMap Kinds — live under [`examples/`](../../examples/).
