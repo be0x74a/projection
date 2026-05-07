@@ -26,7 +26,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -129,6 +131,22 @@ func ensureNamespace(name string) {
 	}
 }
 
+// histogramSampleCount returns the cumulative sample count for the
+// HistogramVec child identified by labelValues. testutil.ToFloat64 panics on
+// histograms (it only handles Counter/Gauge/Untyped), so we read the dto.Metric
+// out of a one-shot Collect and pull SampleCount off the embedded Histogram.
+// Returns 0 when no observation has yet landed on this label set.
+func histogramSampleCount(h *prometheus.HistogramVec, labelValues ...string) uint64 {
+	obs, err := h.GetMetricWithLabelValues(labelValues...)
+	Expect(err).NotTo(HaveOccurred())
+	pb := &dto.Metric{}
+	Expect(obs.(prometheus.Histogram).Write(pb)).To(Succeed())
+	if pb.Histogram == nil {
+		return 0
+	}
+	return pb.Histogram.GetSampleCount()
+}
+
 // deleteProjection forcibly removes a Projection, stripping finalizers if
 // needed so teardown doesn't hang when a test exercised a non-standard path.
 func deleteProjection(key types.NamespacedName) {
@@ -206,9 +224,17 @@ var _ = Describe("Projection Controller (integration)", func() {
 
 		It("projects the source to the destination with overlay applied", func() {
 			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(kindProjection, resultSuccess))
+			beforeHist := histogramSampleCount(e2eSeconds, kindProjection, eventCreate)
 			reconcileOnce(r, projKey)
 			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(kindProjection, resultSuccess))-before).
 				To(BeNumerically(">=", 1), "success counter should have incremented for kind=Projection")
+			// e2e histogram receives one observation per first-create success.
+			// Asserts kind="Projection", event="create" labels are wired and
+			// the create-success branch in writeDestination is the observation
+			// point. Steady-state and Update branches must not contribute, so
+			// later specs may assert tighter bounds.
+			Expect(histogramSampleCount(e2eSeconds, kindProjection, eventCreate)-beforeHist).
+				To(BeNumerically(">=", 1), "e2e histogram should have observed at least one sample for kind=Projection,event=create")
 
 			dst := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: destCMName, Namespace: ns}, dst)).To(Succeed())

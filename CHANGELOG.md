@@ -40,6 +40,7 @@ There is **no automatic migration path** for v0.2 → v0.3. The CRD shape change
   Setting `rbac.aggregate: false` suppresses only the two aggregated namespaced roles. The cluster-admin role is always rendered. End-to-end RBAC matrix verified by SubjectAccessReview tests in `internal/controller/rbac_test.go`.
 - **`examples/configmap-fan-out-list.yaml`** — explicit-list fan-out via `ClusterProjection.spec.destination.namespaces`. Companion to the existing `examples/configmap-fan-out-selector.yaml`.
 - **`projection_watched_dest_gvks`** Prometheus gauge — counts distinct destination GVKs the controller currently watches via `ensureDestWatch`. Companion to the existing `projection_watched_gvks` (source-side).
+- **`projection_e2e_seconds`** Prometheus histogram (`{kind, event}` labels) — wall-clock latency from a `Projection` or `ClusterProjection`'s `creationTimestamp` to the first successful destination Create. Companion to the bench harness in `test/bench/`, which measures the same observation externally — production dashboards can now read what the bench reports. The `event` label is reserved for additive values in future minor releases (`source-update`, `self-heal`, `ns-flip-add`, `ns-flip-cleanup`); v0.3.0 emits `event="create"` only. Buckets are locked at v1.0.
 
 ### Changed
 

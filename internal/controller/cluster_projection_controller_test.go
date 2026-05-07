@@ -144,9 +144,18 @@ var _ = Describe("ClusterProjection Controller (integration)", func() {
 			DeferCleanup(deleteClusterProjection, cpName)
 
 			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(kindClusterProjection, resultSuccess))
+			beforeHist := histogramSampleCount(e2eSeconds, kindClusterProjection, eventCreate)
 			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
 			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(kindClusterProjection, resultSuccess))-before).
 				To(BeNumerically(">=", 1), "success counter should have incremented for kind=ClusterProjection")
+			// One e2e observation per per-namespace successful Create — three
+			// namespaces in this explicit-list spec means delta == 3. Equality
+			// (not >=) catches a regression that double-counts (e.g. observing
+			// on Update too) or undercounts (e.g. observing once per reconcile
+			// rather than once per destination).
+			Expect(histogramSampleCount(e2eSeconds, kindClusterProjection, eventCreate)-beforeHist).
+				To(BeEquivalentTo(uint64(3)),
+					"e2e histogram should have observed exactly one sample per per-namespace create for kind=ClusterProjection,event=create")
 
 			// Every targeted namespace has the destination with our ownership stamps.
 			for _, ns := range []string{ns1, ns2, ns3} {

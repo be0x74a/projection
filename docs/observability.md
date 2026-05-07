@@ -168,6 +168,39 @@ The [API stability promise](api-stability.md) covers metric *names* and existing
 
 If your dashboard relied on the pre-v0.3.0 single-line series `projection_reconcile_total{result="success"}`, that series is still emitted — just with `kind="Projection"` filtering the namespaced reconciler's contribution and `kind="ClusterProjection"` filtering the cluster reconciler's. A query like `sum by (result) (rate(projection_reconcile_total[5m]))` aggregates over both kinds and is the drop-in replacement.
 
+### `projection_e2e_seconds`
+
+`HistogramVec` labeled by `kind` and `event`. New in v0.3.0. Records the wall-clock latency from a CR's `metadata.creationTimestamp` to the first successful destination write — the same observation the bench harness in `test/bench/` measures externally, so production dashboards can read what the bench reports.
+
+```
+projection_e2e_seconds_bucket{kind="Projection",event="create",le="..."}
+projection_e2e_seconds_bucket{kind="ClusterProjection",event="create",le="..."}
+projection_e2e_seconds_count{kind="Projection",event="create"}
+projection_e2e_seconds_count{kind="ClusterProjection",event="create"}
+projection_e2e_seconds_sum{kind="Projection",event="create"}
+projection_e2e_seconds_sum{kind="ClusterProjection",event="create"}
+```
+
+Bucket boundaries (seconds) are `[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]` — sized for the typical create-path floor of a few-tens-of-ms through the slow end of multi-second apiserver-throttled reconciles. They are part of the v1.0 metric API contract and will not be changed.
+
+The observation includes any wait the controller took to resolve the source — if a Projection was applied before its source existed, the histogram measures from the Projection's `creationTimestamp` to the moment a successful Create lands, so a Projection that waited 8s for its source to appear contributes an 8s+ sample. This is the bench-equivalent latency, not a controller-internal "time spent in `Reconcile`" signal — for the latter, use the standard `controller_runtime_reconcile_time_seconds` from controller-runtime.
+
+For `ClusterProjection`, **one observation is recorded per per-namespace successful Create**. A ClusterProjection fanning out to N namespaces yields N observations on the first reconcile that lands a destination in each — the per-namespace samples are individually meaningful (they capture the apiserver round-trip time for that target) and aggregating across them gives the per-CR distribution.
+
+The `event` label is **reserved for additive values in future minor releases** (e.g. `source-update`, `self-heal`, `ns-flip-add`, `ns-flip-cleanup`); v0.3.0 emits `event="create"` only. Per the [pre-v1.0 metric label carve-out](api-stability.md#pre-v10-metric-label-stability-carve-out), additive label *values* on existing metrics are an expected pre-1.0 evolution; renames and removals are not.
+
+Representative queries:
+
+```promql
+# 95th-percentile end-to-end create latency, split by kind.
+histogram_quantile(0.95, sum by (kind, le) (rate(projection_e2e_seconds_bucket[5m])))
+
+# Aggregate average create latency over the last hour, ignoring kind.
+sum(rate(projection_e2e_seconds_sum[1h])) / sum(rate(projection_e2e_seconds_count[1h]))
+```
+
+Pair this metric with the bench harness output (`test/bench/`) for regression-detection: a sustained widening of the gap between the controller-side `_seconds` p95 and the bench-reported p95 indicates apiserver-side latency or a watch-event-delivery pathology, not a controller-internal regression.
+
 ### `projection_watched_gvks`
 
 `Gauge` (no labels). Tracks the number of distinct **source** GVKs the controller currently has dynamic watches registered for. Incremented when a Projection or ClusterProjection references a previously-unseen source GVK.
