@@ -173,6 +173,18 @@ serviceAccount:
   # -- Annotations to add to the ServiceAccount (e.g. IRSA/Workload Identity).
   annotations: {}
 
+# -- End-user-facing RBAC. The controller's own ClusterRole is always
+# rendered; these settings only affect the aggregated user-tier roles
+# that let namespace tenants self-serve Projection access.
+rbac:
+  # -- When true, ship ClusterRoles with aggregation labels so the standard
+  # admin and edit roles in each namespace gain Projection CRUD on their
+  # own namespace, and the standard view role gains read access. Set to
+  # false to disable the aggregated ClusterRoles entirely (you can still
+  # bind the projection-cluster-admin role manually for ClusterProjection
+  # access).
+  aggregate: true
+
 # -- CRD installation settings. Helm 3 only installs files under crds/ on the
 # FIRST install; subsequent upgrades do NOT reconcile CRDs and `helm uninstall`
 # does NOT delete them. Manage CRD lifecycle manually outside of Helm for
