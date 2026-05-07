@@ -84,7 +84,7 @@ func (r *ProjectionReconciler) failSource(ctx context.Context, proj *projectionv
 		"destination write not attempted because source resolution failed")
 	setCondition(proj, conditionReady, metav1.ConditionFalse, reason, msg)
 	r.emit(proj, corev1.EventTypeWarning, reason, action, msg)
-	reconcileTotal.WithLabelValues(resultSourceError).Inc()
+	reconcileTotal.WithLabelValues(kindProjection, resultSourceError).Inc()
 	if err := r.Status().Update(ctx, proj); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -106,9 +106,9 @@ func (r *ProjectionReconciler) failDestination(ctx context.Context, proj *projec
 	setCondition(proj, conditionReady, metav1.ConditionFalse, reason, msg)
 	switch reason {
 	case "DestinationConflict":
-		reconcileTotal.WithLabelValues(resultConflict).Inc()
+		reconcileTotal.WithLabelValues(kindProjection, resultConflict).Inc()
 	default:
-		reconcileTotal.WithLabelValues(resultDestinationError).Inc()
+		reconcileTotal.WithLabelValues(kindProjection, resultDestinationError).Inc()
 	}
 	if err := r.Status().Update(ctx, proj); err != nil {
 		return ctrl.Result{}, err
@@ -130,6 +130,6 @@ func (r *ProjectionReconciler) markAllReady(ctx context.Context, proj *projectio
 	if err := r.Status().Update(ctx, proj); err != nil {
 		return err
 	}
-	reconcileTotal.WithLabelValues(resultSuccess).Inc()
+	reconcileTotal.WithLabelValues(kindProjection, resultSuccess).Inc()
 	return nil
 }

@@ -513,7 +513,7 @@ func (r *ClusterProjectionReconciler) failClusterSource(ctx context.Context, cp 
 		"destination write not attempted because source resolution failed")
 	setClusterCondition(cp, conditionReady, metav1.ConditionFalse, reason, msg)
 	r.emit(cp, corev1.EventTypeWarning, reason, action, msg)
-	reconcileTotal.WithLabelValues(resultSourceError).Inc()
+	reconcileTotal.WithLabelValues(kindClusterProjection, resultSourceError).Inc()
 	if err := r.Status().Update(ctx, cp); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -534,7 +534,7 @@ func (r *ClusterProjectionReconciler) failClusterDestination(ctx context.Context
 	// per-namespace conflict path goes through failClusterDestinationCounts
 	// instead. Bucket every reason into resultDestinationError so the
 	// metric stays accurate without a branch that's never exercised.
-	reconcileTotal.WithLabelValues(resultDestinationError).Inc()
+	reconcileTotal.WithLabelValues(kindClusterProjection, resultDestinationError).Inc()
 	if err := r.Status().Update(ctx, cp); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -557,7 +557,7 @@ func (r *ClusterProjectionReconciler) failClusterDestinationCounts(
 	cp.Status.DestinationName = clusterDestinationName(cp)
 	cp.Status.NamespacesWritten = written
 	cp.Status.NamespacesFailed = failed
-	reconcileTotal.WithLabelValues(resultDestinationError).Inc()
+	reconcileTotal.WithLabelValues(kindClusterProjection, resultDestinationError).Inc()
 	if err := r.Status().Update(ctx, cp); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -577,7 +577,7 @@ func (r *ClusterProjectionReconciler) markAllClusterReady(ctx context.Context, c
 	if err := r.Status().Update(ctx, cp); err != nil {
 		return err
 	}
-	reconcileTotal.WithLabelValues(resultSuccess).Inc()
+	reconcileTotal.WithLabelValues(kindClusterProjection, resultSuccess).Inc()
 	return nil
 }
 

@@ -205,10 +205,10 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("projects the source to the destination with overlay applied", func() {
-			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(resultSuccess))
+			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(kindProjection, resultSuccess))
 			reconcileOnce(r, projKey)
-			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(resultSuccess))-before).
-				To(BeNumerically(">=", 1), "success counter should have incremented")
+			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(kindProjection, resultSuccess))-before).
+				To(BeNumerically(">=", 1), "success counter should have incremented for kind=Projection")
 
 			dst := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: destCMName, Namespace: ns}, dst)).To(Succeed())
@@ -394,10 +394,10 @@ var _ = Describe("Projection Controller (integration)", func() {
 		})
 
 		It("sets Ready=False with reason DestinationConflict and leaves the stranger untouched", func() {
-			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(resultConflict))
+			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(kindProjection, resultConflict))
 			reconcileOnce(r, projKey)
-			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(resultConflict))-before).
-				To(BeNumerically(">=", 1), "conflict counter should have incremented")
+			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(kindProjection, resultConflict))-before).
+				To(BeNumerically(">=", 1), "conflict counter should have incremented for kind=Projection")
 
 			// Stranger ConfigMap unchanged.
 			dst := &corev1.ConfigMap{}

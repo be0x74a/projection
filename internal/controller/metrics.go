@@ -29,15 +29,24 @@ const (
 	resultDestinationError = "destination_error"
 )
 
-// reconcileTotal counts Projection reconcile outcomes. Registered on
+// Kind label values for reconcileTotal. The strings match the CRD Kind names
+// verbatim because they are externally visible — dashboards and PromQL
+// expressions filter on them.
+const (
+	kindProjection        = "Projection"
+	kindClusterProjection = "ClusterProjection"
+)
+
+// reconcileTotal counts reconcile outcomes partitioned by CR kind
+// (Projection / ClusterProjection) and result bucket. Registered on
 // controller-runtime's global metrics registry so it is exposed automatically
 // on the manager's :8443/metrics endpoint.
 var reconcileTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "projection_reconcile_total",
-		Help: "Total Projection reconciles partitioned by outcome.",
+		Help: "Total reconciles partitioned by CR kind and outcome.",
 	},
-	[]string{"result"},
+	[]string{"kind", "result"},
 )
 
 // watchedGvks mirrors the size of ProjectionReconciler.watched. Incremented
