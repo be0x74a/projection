@@ -185,10 +185,11 @@ func (r *ProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.failDestination(ctx, proj, resolvedVersion, reason, msg)
 	}
 
-	// Register the dest-side watch after the first successful write. Any
-	// subsequent manual `kubectl delete` (or stranger overwrite) of the
-	// projected object now triggers an immediate reconcile via the watch
-	// rather than waiting for the periodic resync.
+	// Register the dest-side watch on the success path (the failure path
+	// returns above via failDestination, which doesn't register a watch).
+	// Any subsequent manual `kubectl delete` (or stranger overwrite) of
+	// the projected object now triggers an immediate reconcile via the
+	// watch rather than waiting for the periodic resync.
 	if err := r.ensureNamespacedDestWatch(watchGVK); err != nil {
 		logger.Error(err, "registering destination watch", "gvk", watchGVK)
 	}

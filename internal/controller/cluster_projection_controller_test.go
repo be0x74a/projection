@@ -435,6 +435,335 @@ var _ = Describe("ClusterProjection Controller (integration)", func() {
 		})
 	})
 
+	Context("Source GVR resolution failure", func() {
+		It("surfaces SourceResolutionFailed and creates no destinations when the Kind is unknown", func() {
+			cpName := uniqueCPName("cp-unknown-kind")
+			ns1 := uniqueNS("cp-unknown")
+			ns2 := uniqueNS("cp-unknown")
+
+			ensureNamespace(ns1)
+			ensureNamespace(ns2)
+
+			// Reference a Kind the RESTMapper doesn't know about. resolveGVR
+			// must surface this as SourceResolutionFailed without ever
+			// attempting a destination write.
+			cp := &projectionv1.ClusterProjection{
+				ObjectMeta: metav1.ObjectMeta{Name: cpName},
+				Spec: projectionv1.ClusterProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Group: "imaginary.example.com", Version: "v1",
+						Kind: "FleetOfUnicorns",
+						Name: "nope", Namespace: "nope",
+					},
+					Destination: projectionv1.ClusterProjectionDestination{
+						Namespaces: []string{ns1, ns2},
+						Name:       "ghost-cm",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cp)).To(Succeed())
+			DeferCleanup(deleteClusterProjection, cpName)
+
+			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+
+			fresh := &projectionv1.ClusterProjection{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cpName}, fresh)).To(Succeed())
+
+			sr := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionSourceResolved)
+			Expect(sr).NotTo(BeNil())
+			Expect(sr.Status).To(Equal(metav1.ConditionFalse))
+			Expect(sr.Reason).To(Equal("SourceResolutionFailed"))
+
+			ready := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionReady)
+			Expect(ready).NotTo(BeNil())
+			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+
+			// No destination ConfigMap should have been written in any namespace.
+			for _, ns := range []string{ns1, ns2} {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "ghost-cm", Namespace: ns}, &corev1.ConfigMap{})
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+					"no destination should have been written in %s", ns)
+			}
+		})
+	})
+
+	Context("Source 404 with cleanup across namespaces", func() {
+		It("removes every destination across all targeted namespaces when the source disappears", func() {
+			cpName := uniqueCPName("cp-srcdel")
+			srcNS := uniqueNS("cp-srcdel-src")
+			ns1 := uniqueNS("cp-srcdel-tgt")
+			ns2 := uniqueNS("cp-srcdel-tgt")
+			ns3 := uniqueNS("cp-srcdel-tgt")
+
+			ensureNamespace(srcNS)
+			ensureNamespace(ns1)
+			ensureNamespace(ns2)
+			ensureNamespace(ns3)
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "src-cm",
+					Namespace:   srcNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"k": "v"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			cp := &projectionv1.ClusterProjection{
+				ObjectMeta: metav1.ObjectMeta{Name: cpName},
+				Spec: projectionv1.ClusterProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Version: "v1", Kind: "ConfigMap",
+						Name: src.Name, Namespace: srcNS,
+					},
+					Destination: projectionv1.ClusterProjectionDestination{
+						Namespaces: []string{ns1, ns2, ns3},
+						Name:       "fanout-cm",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cp)).To(Succeed())
+			DeferCleanup(deleteClusterProjection, cpName)
+
+			By("first reconcile — destinations exist in every targeted namespace")
+			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+			for _, ns := range []string{ns1, ns2, ns3} {
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "fanout-cm", Namespace: ns}, &corev1.ConfigMap{})).
+					To(Succeed(), "destination missing in %s after first reconcile", ns)
+			}
+
+			By("deleting the source object")
+			Expect(k8sClient.Delete(ctx, src)).To(Succeed())
+
+			By("second reconcile — source 404 triggers cluster-wide cleanup")
+			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+
+			// All destinations should be cleaned up — exercises
+			// deleteAllClusterOwnedDestinations through
+			// handleClusterSourceFetchError.
+			for _, ns := range []string{ns1, ns2, ns3} {
+				Eventually(func() bool {
+					err := k8sClient.Get(ctx, types.NamespacedName{Name: "fanout-cm", Namespace: ns}, &corev1.ConfigMap{})
+					return apierrors.IsNotFound(err)
+				}, 2*time.Second, 100*time.Millisecond).Should(BeTrue(),
+					"destination should be removed from %s after source deletion", ns)
+			}
+
+			fresh := &projectionv1.ClusterProjection{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cpName}, fresh)).To(Succeed())
+			sr := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionSourceResolved)
+			Expect(sr).NotTo(BeNil())
+			Expect(sr.Status).To(Equal(metav1.ConditionFalse))
+			Expect(sr.Reason).To(Equal("SourceDeleted"))
+		})
+	})
+
+	Context("Empty namespace selector footgun", func() {
+		It("rejects a ClusterProjection with namespaceSelector: {} and writes no destinations", func() {
+			cpName := uniqueCPName("cp-empty-sel")
+			srcNS := uniqueNS("cp-empty-sel-src")
+			otherNS := uniqueNS("cp-empty-sel-other")
+
+			ensureNamespace(srcNS)
+			ensureNamespace(otherNS)
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "src-cm",
+					Namespace:   srcNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"k": "v"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			// namespaceSelector: {} (empty matchLabels and matchExpressions)
+			// satisfies CEL admission (`has(self.namespaceSelector)` is true)
+			// but resolveTargetNamespaces refuses to fan out across the
+			// entire cluster.
+			cp := &projectionv1.ClusterProjection{
+				ObjectMeta: metav1.ObjectMeta{Name: cpName},
+				Spec: projectionv1.ClusterProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Version: "v1", Kind: "ConfigMap",
+						Name: src.Name, Namespace: srcNS,
+					},
+					Destination: projectionv1.ClusterProjectionDestination{
+						NamespaceSelector: &metav1.LabelSelector{},
+						Name:              "should-never-exist",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cp)).To(Succeed())
+			DeferCleanup(deleteClusterProjection, cpName)
+
+			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+
+			fresh := &projectionv1.ClusterProjection{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cpName}, fresh)).To(Succeed())
+
+			ready := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionReady)
+			Expect(ready).NotTo(BeNil())
+			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+			Expect(ready.Reason).To(Equal("TargetResolutionFailed"))
+
+			dw := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionDestinationWritten)
+			Expect(dw).NotTo(BeNil())
+			Expect(dw.Status).To(Equal(metav1.ConditionFalse))
+			Expect(dw.Message).To(ContainSubstring("entire cluster"),
+				"failure message should explain the empty-selector veto, got: %q", dw.Message)
+
+			Expect(fresh.Status.NamespacesWritten).To(BeEquivalentTo(0))
+			Expect(fresh.Status.NamespacesFailed).To(BeEquivalentTo(0))
+
+			// No ConfigMap of that name anywhere — including in the source namespace.
+			for _, ns := range []string{srcNS, otherNS} {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "should-never-exist", Namespace: ns}, &corev1.ConfigMap{})
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+					"empty-selector ClusterProjection must not write into %s", ns)
+			}
+		})
+	})
+
+	Context("Source opt-out with projectable=false", func() {
+		It("garbage-collects every destination and surfaces SourceOptedOut", func() {
+			cpName := uniqueCPName("cp-optout")
+			srcNS := uniqueNS("cp-optout-src")
+			ns1 := uniqueNS("cp-optout-tgt")
+			ns2 := uniqueNS("cp-optout-tgt")
+
+			ensureNamespace(srcNS)
+			ensureNamespace(ns1)
+			ensureNamespace(ns2)
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "src-cm",
+					Namespace:   srcNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"k": "v"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			cp := &projectionv1.ClusterProjection{
+				ObjectMeta: metav1.ObjectMeta{Name: cpName},
+				Spec: projectionv1.ClusterProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Version: "v1", Kind: "ConfigMap",
+						Name: src.Name, Namespace: srcNS,
+					},
+					Destination: projectionv1.ClusterProjectionDestination{
+						Namespaces: []string{ns1, ns2},
+						Name:       "optout-cm",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cp)).To(Succeed())
+			DeferCleanup(deleteClusterProjection, cpName)
+
+			By("first reconcile — destinations are written")
+			r.SourceMode = SourceModePermissive
+			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+			for _, ns := range []string{ns1, ns2} {
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "optout-cm", Namespace: ns}, &corev1.ConfigMap{})).
+					To(Succeed(), "destination missing in %s", ns)
+			}
+
+			By("source owner flips projectable=false to opt out")
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: src.Name, Namespace: srcNS}, src)).To(Succeed())
+			src.Annotations[projectableAnnotation] = "false"
+			Expect(k8sClient.Update(ctx, src)).To(Succeed())
+
+			By("second reconcile — destinations are GC'd cluster-wide and status reflects SourceOptedOut")
+			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+
+			for _, ns := range []string{ns1, ns2} {
+				Eventually(func() bool {
+					err := k8sClient.Get(ctx, types.NamespacedName{Name: "optout-cm", Namespace: ns}, &corev1.ConfigMap{})
+					return apierrors.IsNotFound(err)
+				}, 2*time.Second, 100*time.Millisecond).Should(BeTrue(),
+					"destination should be removed from %s after opt-out", ns)
+			}
+
+			fresh := &projectionv1.ClusterProjection{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cpName}, fresh)).To(Succeed())
+
+			sr := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionSourceResolved)
+			Expect(sr).NotTo(BeNil())
+			Expect(sr.Status).To(Equal(metav1.ConditionFalse))
+			Expect(sr.Reason).To(Equal("SourceOptedOut"))
+
+			dw := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionDestinationWritten)
+			Expect(dw).NotTo(BeNil())
+			// Source resolution failed (opted out), so destination write is
+			// surfaced as Unknown via failClusterSource.
+			Expect(dw.Status).To(Equal(metav1.ConditionUnknown))
+			Expect(dw.Reason).To(Equal("SourceNotResolved"))
+		})
+	})
+
+	Context("Namespace event mapping (mapNamespace)", func() {
+		It("only enqueues explicit-list ClusterProjections that target the event namespace", func() {
+			// Two CPs with disjoint explicit namespace lists. A namespace
+			// event for cp1's list must not enqueue cp2 (and vice versa).
+			cp1Name := uniqueCPName("cp-ns-evt-a")
+			cp2Name := uniqueCPName("cp-ns-evt-b")
+			ns1 := uniqueNS("cp-ns-evt-a")
+			ns2 := uniqueNS("cp-ns-evt-b")
+
+			cp1 := &projectionv1.ClusterProjection{
+				ObjectMeta: metav1.ObjectMeta{Name: cp1Name},
+				Spec: projectionv1.ClusterProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Version: "v1", Kind: "ConfigMap",
+						Name: "irrelevant", Namespace: "irrelevant",
+					},
+					Destination: projectionv1.ClusterProjectionDestination{
+						Namespaces: []string{ns1},
+					},
+				},
+			}
+			cp2 := &projectionv1.ClusterProjection{
+				ObjectMeta: metav1.ObjectMeta{Name: cp2Name},
+				Spec: projectionv1.ClusterProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Version: "v1", Kind: "ConfigMap",
+						Name: "irrelevant", Namespace: "irrelevant",
+					},
+					Destination: projectionv1.ClusterProjectionDestination{
+						Namespaces: []string{ns2},
+					},
+				},
+			}
+
+			items := []projectionv1.ClusterProjection{*cp1, *cp2}
+
+			toNames := func(reqs []reconcile.Request) []string {
+				out := make([]string, 0, len(reqs))
+				for _, req := range reqs {
+					out = append(out, req.Name)
+				}
+				return out
+			}
+
+			// Event for ns1: only cp1 should be enqueued.
+			names := toNames(r.matchingClusterProjectionRequests(items, ns1, nil))
+			Expect(names).To(ConsistOf(cp1Name),
+				"namespace event for %q should only enqueue the CP that targets it, got %v", ns1, names)
+
+			// Event for ns2: only cp2 should be enqueued.
+			names = toNames(r.matchingClusterProjectionRequests(items, ns2, nil))
+			Expect(names).To(ConsistOf(cp2Name),
+				"namespace event for %q should only enqueue the CP that targets it, got %v", ns2, names)
+
+			// Event for an unrelated namespace: nothing should be enqueued.
+			Expect(r.matchingClusterProjectionRequests(items, "unrelated-ns", nil)).To(BeEmpty(),
+				"namespace event for an unrelated namespace must not enqueue any explicit-list CP")
+		})
+	})
+
 	Context("Finalizer cleanup on ClusterProjection delete", func() {
 		It("removes every owned destination across all namespaces before the finalizer is stripped", func() {
 			cpName := uniqueCPName("cp-finalizer")

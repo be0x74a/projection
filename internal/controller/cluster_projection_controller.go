@@ -162,9 +162,11 @@ func (r *ClusterProjectionReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(cleanupErr, "cleaning up stale cluster destinations")
 	}
 
-	// Register the dest-side watch after the first successful write so a
-	// subsequent manual `kubectl delete` of a projected object self-heals
-	// without waiting for the periodic resync.
+	// Register the dest-side watch after the fan-out completes (whether or
+	// not any writes succeeded) so a subsequent manual `kubectl delete` of
+	// a projected object self-heals without waiting for the periodic
+	// resync. Registering on partial-failure too is fine: the watch is
+	// keyed on dest GVK, idempotent, and only fires for objects we own.
 	if err := r.ensureClusterDestWatch(watchGVK); err != nil {
 		logger.Error(err, "registering destination watch", "gvk", watchGVK)
 	}
@@ -434,6 +436,7 @@ func (r *ClusterProjectionReconciler) enqueueByUID(ctx context.Context, uid stri
 // Re-enqueues fan-out work when a namespace gains or loses a selector
 // label without waiting for the periodic resync.
 func (r *ClusterProjectionReconciler) mapNamespace(ctx context.Context, obj client.Object) []reconcile.Request {
+	eventNS := obj.GetName()
 	ns, ok := obj.(*corev1.Namespace)
 	if !ok {
 		// PartialObjectMetadata or similar; we still match labels.
@@ -441,37 +444,45 @@ func (r *ClusterProjectionReconciler) mapNamespace(ctx context.Context, obj clie
 		if err := r.List(ctx, &list); err != nil {
 			return nil
 		}
-		return r.matchingClusterProjectionRequests(list.Items, obj.GetLabels())
+		return r.matchingClusterProjectionRequests(list.Items, eventNS, obj.GetLabels())
 	}
 	var list projectionv1.ClusterProjectionList
 	if err := r.List(ctx, &list); err != nil {
 		log.FromContext(ctx).Error(err, "listing cluster-projections for namespace event", "namespace", ns.Name)
 		return nil
 	}
-	return r.matchingClusterProjectionRequests(list.Items, ns.Labels)
+	return r.matchingClusterProjectionRequests(list.Items, eventNS, ns.Labels)
 }
 
 // matchingClusterProjectionRequests returns the reconcile.Requests for
-// every ClusterProjection in items whose selector matches nsLabels. The
-// list-then-filter shape avoids needing a per-(label-key) field
+// every ClusterProjection in items that should be re-enqueued in response
+// to a namespace event for eventNS (with labels nsLabels).
+//
+// For explicit-list CPs we only enqueue when eventNS is in the list — a
+// previous version enqueued every explicit-list CP regardless, which was a
+// soft-DoS during namespace churn (N CPs, each unrelated to the event,
+// still got re-reconciled). For selector CPs we enqueue whenever the
+// selector matches nsLabels — the selector might newly match (or stop
+// matching, requiring stale-cleanup), so we can't filter by current
+// membership.
+//
+// The list-then-filter shape avoids needing a per-(label-key) field
 // indexer — at the cluster-projection scale we expect (tens, not
 // thousands), the filter is trivial.
-func (r *ClusterProjectionReconciler) matchingClusterProjectionRequests(items []projectionv1.ClusterProjection, nsLabels map[string]string) []reconcile.Request {
+func (r *ClusterProjectionReconciler) matchingClusterProjectionRequests(items []projectionv1.ClusterProjection, eventNS string, nsLabels map[string]string) []reconcile.Request {
 	var reqs []reconcile.Request
 	for i := range items {
 		cp := &items[i]
 		// Explicit-list ClusterProjections care about namespace add/delete
-		// events too — a freshly-created namespace listed in
-		// spec.destination.namespaces should trigger a write — but the
-		// match isn't selector-based, so we filter by membership.
+		// events for namespaces they actually target. Filter by
+		// membership: only enqueue when eventNS appears in the list.
 		if len(cp.Spec.Destination.Namespaces) > 0 {
-			// Find by namespace name; nsLabels carries the namespace
-			// labels but the namespace's own name is in obj.GetName(),
-			// which we don't have here. Just enqueue every
-			// explicit-list cp so it can re-resolve. In a busy cluster
-			// this is still O(num cluster-projections) on every namespace
-			// event, but cluster-projection cardinality is small.
-			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKey{Name: cp.Name}})
+			for _, ns := range cp.Spec.Destination.Namespaces {
+				if ns == eventNS {
+					reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKey{Name: cp.Name}})
+					break
+				}
+			}
 			continue
 		}
 		if cp.Spec.Destination.NamespaceSelector == nil {
@@ -519,12 +530,11 @@ func (r *ClusterProjectionReconciler) failClusterDestination(ctx context.Context
 	setClusterCondition(cp, conditionReady, metav1.ConditionFalse, reason, msg)
 	cp.Status.NamespacesWritten = 0
 	cp.Status.NamespacesFailed = 0
-	switch reason {
-	case "DestinationConflict":
-		reconcileTotal.WithLabelValues(resultConflict).Inc()
-	default:
-		reconcileTotal.WithLabelValues(resultDestinationError).Inc()
-	}
+	// Today the only call site passes reason="TargetResolutionFailed"; the
+	// per-namespace conflict path goes through failClusterDestinationCounts
+	// instead. Bucket every reason into resultDestinationError so the
+	// metric stays accurate without a branch that's never exercised.
+	reconcileTotal.WithLabelValues(resultDestinationError).Inc()
 	if err := r.Status().Update(ctx, cp); err != nil {
 		return ctrl.Result{}, err
 	}
