@@ -9,8 +9,14 @@ import (
 	"time"
 )
 
+// fanoutStamps is the number of stamps applied per CP-* fan-out measurement
+// pass. 30 lands the p99 estimator on the 30th sample (index 29); see
+// quantiles().
+const fanoutStamps = 30
+
 // runProfile runs bootstrap → measure → teardown for one profile and returns
-// the Report.
+// the Report. Mixed profiles run all applicable measurement paths and emit
+// every distribution that was exercised.
 func runProfile(ctx context.Context, c *clients, p Profile, metricsURL string) (*Report, error) {
 	start := time.Now()
 
@@ -23,7 +29,7 @@ func runProfile(ctx context.Context, c *clients, p Profile, metricsURL string) (
 	// Steady-state settle: give the controller time to reconcile the initial
 	// backlog before we start measuring.
 	settle := 30 * time.Second
-	if p.Projections > 500 {
+	if p.NamespacedProjections > 500 || p.SelectorNamespaces > 500 || p.ListNamespaces > 500 {
 		settle = 60 * time.Second
 	}
 	time.Sleep(settle)
@@ -40,30 +46,38 @@ func runProfile(ctx context.Context, c *clients, p Profile, metricsURL string) (
 		baseline = MetricsSnapshot{}
 	}
 
-	// Measurement window. Selector profiles observe earliest vs slowest
-	// fan-out latency across the full matched-destination set via a
-	// List-driven poll; other profiles sample across Projections.
+	// Measurement window. Run every applicable shape; mixed profiles get
+	// all three populated.
 	var m Measurements
-	if p.SelectorNamespaces > 0 {
-		const selectorStamps = 30
-		sel, err := measureE2ESelector(ctx, c, res.Projections[0], res.DestNsList, selectorStamps)
-		if err != nil {
-			return nil, fmt.Errorf("measure selector e2e: %w", err)
-		}
-		m.E2EFanoutSamples = sel.Samples
-		m.E2EEarliestP50, m.E2EEarliestP95, m.E2EEarliestP99 = sel.Earliest.P50, sel.Earliest.P95, sel.Earliest.P99
-		m.E2ESlowestP50, m.E2ESlowestP95, m.E2ESlowestP99 = sel.Slowest.P50, sel.Slowest.P95, sel.Slowest.P99
-	} else {
-		sample := res.Projections
+	if p.NamespacedProjections > 0 {
+		sample := res.NPRefs
 		if len(sample) > 100 {
 			sample = sample[:100]
 		}
-		latency, err := measureE2ESingle(ctx, c, sample)
-		if err != nil {
-			return nil, fmt.Errorf("measure e2e: %w", err)
+		latency, mErr := measureE2ESingle(ctx, c, sample)
+		if mErr != nil {
+			return nil, fmt.Errorf("measure NP e2e: %w", mErr)
 		}
-		m.E2ESamples = latency.Samples
-		m.E2EP50, m.E2EP95, m.E2EP99 = latency.P50, latency.P95, latency.P99
+		m.E2ENPSamples = latency.Samples
+		m.E2ENPP50, m.E2ENPP95, m.E2ENPP99 = latency.P50, latency.P95, latency.P99
+	}
+	if p.SelectorNamespaces > 0 {
+		fan, mErr := measureE2EClusterFanout(ctx, c, *res.CPSelectorRef, res.CPSelectorDsts, fanoutStamps)
+		if mErr != nil {
+			return nil, fmt.Errorf("measure cp-selector e2e: %w", mErr)
+		}
+		m.E2ECPSelSamples = fan.Samples
+		m.E2ECPSelEarliestP50, m.E2ECPSelEarliestP95, m.E2ECPSelEarliestP99 = fan.Earliest.P50, fan.Earliest.P95, fan.Earliest.P99
+		m.E2ECPSelSlowestP50, m.E2ECPSelSlowestP95, m.E2ECPSelSlowestP99 = fan.Slowest.P50, fan.Slowest.P95, fan.Slowest.P99
+	}
+	if p.ListNamespaces > 0 {
+		fan, mErr := measureE2EClusterFanout(ctx, c, *res.CPListRef, res.CPListDsts, fanoutStamps)
+		if mErr != nil {
+			return nil, fmt.Errorf("measure cp-list e2e: %w", mErr)
+		}
+		m.E2ECPListSamples = fan.Samples
+		m.E2ECPListEarliestP50, m.E2ECPListEarliestP95, m.E2ECPListEarliestP99 = fan.Earliest.P50, fan.Earliest.P95, fan.Earliest.P99
+		m.E2ECPListSlowestP50, m.E2ECPListSlowestP95, m.E2ECPListSlowestP99 = fan.Slowest.P50, fan.Slowest.P95, fan.Slowest.P99
 	}
 
 	// Final scrape. Same tolerance rationale as the baseline above.

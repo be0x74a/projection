@@ -12,23 +12,29 @@ import (
 )
 
 func main() {
-	profileName := flag.String("profile", "", "operating-point profile: small, medium, selector, full, custom")
+	profileName := flag.String("profile", "",
+		"operating-point profile: "+validProfileNames)
 	kubeconfig := flag.String("kubeconfig", "", "path to kubeconfig (required; default-lookup is refused for safety)")
 	allowDefault := flag.Bool("yes-i-know-this-is-a-test-cluster", false, "bypass the default-kubeconfig safety gate")
 	output := flag.String("output", "text", "output format: text or json")
-	projections := flag.Int("projections", 0, "custom profile: number of Projections")
+	namespacedProjections := flag.Int("namespaced-projections", 0,
+		"custom profile: number of namespaced Projection CRs (single-target shape)")
+	selectorNamespaces := flag.Int("selector-namespaces", 0,
+		"custom profile: number of label-matched namespaces for the CP-selector instance")
+	listNamespaces := flag.Int("list-namespaces", 0,
+		"custom profile: number of explicit-list namespaces for the CP-list instance")
 	gvks := flag.Int("gvks", 0, "custom profile: number of distinct source GVKs")
-	namespaces := flag.Int("namespaces", 0, "custom profile: number of source+dest namespaces")
-	selectorNs := flag.Int("selector-ns", 0, "custom profile: matching namespaces for selector profile")
+	namespaces := flag.Int("namespaces", 0, "custom profile: number of NP source+dest namespaces")
 	metricsURL := flag.String("metrics-url", "http://127.0.0.1:8080/metrics",
 		"controller metrics endpoint; defaults to the `make run` shell's plain-http bind")
 	flag.Parse()
 
 	overrides := ProfileOverrides{
-		Projections:        *projections,
-		GVKs:               *gvks,
-		Namespaces:         *namespaces,
-		SelectorNamespaces: *selectorNs,
+		NamespacedProjections: *namespacedProjections,
+		SelectorNamespaces:    *selectorNamespaces,
+		ListNamespaces:        *listNamespaces,
+		GVKs:                  *gvks,
+		Namespaces:            *namespaces,
 	}
 
 	if err := run(*profileName, *kubeconfig, *allowDefault, *output, *metricsURL, overrides); err != nil {
@@ -53,15 +59,18 @@ func run(profileName, kubeconfig string, allowDefault bool, output, metricsURL s
 	defer cancel()
 
 	var profiles []Profile
-	if profileName == "full" {
-		profiles, err = ExpandFull()
+	switch profileName {
+	case "full":
+		profiles = ExpandFull()
+	case "fast":
+		profiles, err = ExpandFast()
 		if err != nil {
 			return err
 		}
-	} else {
-		p, err := ParseProfile(profileName, overrides)
-		if err != nil {
-			return err
+	default:
+		p, perr := ParseProfile(profileName, overrides)
+		if perr != nil {
+			return perr
 		}
 		profiles = []Profile{p}
 	}

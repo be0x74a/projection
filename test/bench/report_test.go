@@ -10,7 +10,7 @@ import (
 
 func TestReportJSON(t *testing.T) {
 	r := Report{
-		Profile: Profile{Name: "small", Projections: 100, GVKs: 10, Namespaces: 10},
+		Profile: Profile{Name: "np-typical", NamespacedProjections: 100, GVKs: 10, Namespaces: 10},
 		Environment: Environment{
 			KubeconfigHost: "https://127.0.0.1:6443",
 			Timestamp:      "2026-04-18T12:00:00Z",
@@ -22,10 +22,10 @@ func TestReportJSON(t *testing.T) {
 			ReconcileP50Ms:     6.3,
 			ReconcileP95Ms:     18.1,
 			ReconcileP99Ms:     27.0,
-			E2ESamples:         100,
-			E2EP50:             50 * time.Millisecond,
-			E2EP95:             180 * time.Millisecond,
-			E2EP99:             420 * time.Millisecond,
+			E2ENPSamples:       100,
+			E2ENPP50:           50 * time.Millisecond,
+			E2ENPP95:           180 * time.Millisecond,
+			E2ENPP99:           420 * time.Millisecond,
 		},
 		DurationSeconds: 123.0,
 	}
@@ -38,43 +38,21 @@ func TestReportJSON(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if back.Profile.Name != "small" {
+	if back.Profile.Name != "np-typical" {
 		t.Errorf("profile name lost: %+v", back)
 	}
-}
-
-func TestReportText(t *testing.T) {
-	r := Report{
-		Profile:      Profile{Name: "small", Projections: 100, GVKs: 10, Namespaces: 10},
-		Measurements: Measurements{ReconcileP50Ms: 6.3, E2EP95: 180 * time.Millisecond},
-	}
-	var buf bytes.Buffer
-	if err := r.WriteText(&buf); err != nil {
-		t.Fatalf("WriteText: %v", err)
-	}
-	out := buf.String()
-	for _, want := range []string{"small", "100", "p50", "p95", "controller_rss_mb", "controller_cpu_seconds_delta"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("text output missing %q:\n%s", want, out)
-		}
-	}
-	// Non-selector profile must NOT print selector-specific rows.
-	for _, banned := range []string{"e2e_first_ns", "e2e_last_ns", "e2e_earliest", "e2e_slowest"} {
-		if strings.Contains(out, banned) {
-			t.Errorf("text output unexpectedly includes %q for non-selector profile:\n%s", banned, out)
-		}
+	if back.Measurements.E2ENPSamples != 100 {
+		t.Errorf("E2ENPSamples lost: %+v", back.Measurements)
 	}
 }
 
-func TestReportText_Selector(t *testing.T) {
+func TestReportText_NPOnly(t *testing.T) {
 	r := Report{
-		Profile: Profile{Name: "selector", Projections: 1, GVKs: 1, Namespaces: 1, SelectorNamespaces: 100},
+		Profile: Profile{Name: "np-typical", NamespacedProjections: 100, GVKs: 10, Namespaces: 10},
 		Measurements: Measurements{
-			ReconcileP50Ms: 4.0,
-			E2EEarliestP50: 40 * time.Millisecond,
-			E2EEarliestP99: 120 * time.Millisecond,
-			E2ESlowestP50:  400 * time.Millisecond,
-			E2ESlowestP99:  950 * time.Millisecond,
+			ReconcileP50Ms: 6.3,
+			E2ENPP50:       50 * time.Millisecond,
+			E2ENPP95:       180 * time.Millisecond,
 		},
 	}
 	var buf bytes.Buffer
@@ -82,21 +60,127 @@ func TestReportText_Selector(t *testing.T) {
 		t.Fatalf("WriteText: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"selector_ns", "e2e_earliest_p50", "e2e_slowest_p99", "100"} {
+	for _, want := range []string{
+		"np-typical", "namespaced_projections", "100",
+		"e2e_np_p50", "e2e_np_p95", "e2e_np_p99",
+		"controller_rss_mb", "controller_cpu_seconds_delta",
+	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("selector text output missing %q:\n%s", want, out)
+			t.Errorf("text output missing %q:\n%s", want, out)
 		}
 	}
-	// The renamed fields must replace the old first-ns/last-ns rows entirely.
-	for _, banned := range []string{"e2e_first_ns", "e2e_last_ns"} {
+	// NP-only profile must NOT print CP-* rows.
+	for _, banned := range []string{
+		"e2e_cp_sel_earliest", "e2e_cp_sel_slowest",
+		"e2e_cp_list_earliest", "e2e_cp_list_slowest",
+	} {
 		if strings.Contains(out, banned) {
-			t.Errorf("selector text output unexpectedly includes legacy field %q:\n%s", banned, out)
+			t.Errorf("NP-only text output unexpectedly includes %q:\n%s", banned, out)
 		}
 	}
-	// Selector profile must NOT print the non-selector e2e_p50/p95/p99 rows.
-	for _, banned := range []string{"\ne2e_p50", "\ne2e_p95", "\ne2e_p99"} {
+}
+
+func TestReportText_CPSelector(t *testing.T) {
+	r := Report{
+		Profile: Profile{Name: "cp-selector-typical", SelectorNamespaces: 50, GVKs: 1, Namespaces: 1},
+		Measurements: Measurements{
+			ReconcileP50Ms:      4.0,
+			E2ECPSelEarliestP50: 40 * time.Millisecond,
+			E2ECPSelEarliestP99: 120 * time.Millisecond,
+			E2ECPSelSlowestP50:  400 * time.Millisecond,
+			E2ECPSelSlowestP99:  950 * time.Millisecond,
+		},
+	}
+	var buf bytes.Buffer
+	if err := r.WriteText(&buf); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"selector_namespaces", "50",
+		"e2e_cp_sel_earliest_p50", "e2e_cp_sel_slowest_p99",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cp-selector text output missing %q:\n%s", want, out)
+		}
+	}
+	// CP-selector-only must NOT print NP or CP-list rows.
+	for _, banned := range []string{
+		"e2e_np_p50", "e2e_np_p95",
+		"e2e_cp_list_earliest", "e2e_cp_list_slowest",
+	} {
 		if strings.Contains(out, banned) {
-			t.Errorf("selector text output unexpectedly includes %q:\n%s", banned, out)
+			t.Errorf("cp-selector text output unexpectedly includes %q:\n%s", banned, out)
+		}
+	}
+	// Legacy field names must be gone.
+	for _, banned := range []string{"e2e_first_ns", "e2e_last_ns", "e2e_earliest_p50", "e2e_slowest_p50"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("cp-selector text output unexpectedly includes legacy field %q:\n%s", banned, out)
+		}
+	}
+}
+
+func TestReportText_CPList(t *testing.T) {
+	r := Report{
+		Profile: Profile{Name: "cp-list-typical", ListNamespaces: 10, GVKs: 1, Namespaces: 1},
+		Measurements: Measurements{
+			ReconcileP50Ms:       3.0,
+			E2ECPListEarliestP50: 25 * time.Millisecond,
+			E2ECPListSlowestP99:  300 * time.Millisecond,
+		},
+	}
+	var buf bytes.Buffer
+	if err := r.WriteText(&buf); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"list_namespaces", "10",
+		"e2e_cp_list_earliest_p50", "e2e_cp_list_slowest_p99",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cp-list text output missing %q:\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{
+		"e2e_np_p50",
+		"e2e_cp_sel_earliest", "e2e_cp_sel_slowest",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("cp-list text output unexpectedly includes %q:\n%s", banned, out)
+		}
+	}
+}
+
+func TestReportText_Mixed(t *testing.T) {
+	r := Report{
+		Profile: Profile{
+			Name: "mixed-typical", NamespacedProjections: 100,
+			SelectorNamespaces: 50, ListNamespaces: 10, GVKs: 10, Namespaces: 10,
+		},
+		Measurements: Measurements{
+			ReconcileP50Ms:       5.0,
+			E2ENPP50:             40 * time.Millisecond,
+			E2ECPSelEarliestP50:  35 * time.Millisecond,
+			E2ECPSelSlowestP50:   250 * time.Millisecond,
+			E2ECPListEarliestP50: 20 * time.Millisecond,
+			E2ECPListSlowestP50:  120 * time.Millisecond,
+		},
+	}
+	var buf bytes.Buffer
+	if err := r.WriteText(&buf); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"mixed-typical",
+		"e2e_np_p50",
+		"e2e_cp_sel_earliest_p50", "e2e_cp_sel_slowest_p50",
+		"e2e_cp_list_earliest_p50", "e2e_cp_list_slowest_p50",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("mixed text output missing %q:\n%s", want, out)
 		}
 	}
 }

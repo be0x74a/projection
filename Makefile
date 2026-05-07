@@ -77,11 +77,11 @@ test: manifests generate fmt vet envtest ## Run tests.
 test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
-PROFILE ?= small
+PROFILE ?= fast
 KUBECONFIG_BENCH ?= $(HOME)/.kube/bench.config
 
 .PHONY: bench
-bench: ## Run the benchmark harness against a Kind cluster. Set PROFILE=small|medium|selector|full|custom and KUBECONFIG_BENCH=/path/to/bench/kubeconfig.
+bench: ## Run the benchmark harness against a Kind cluster. Set PROFILE=np-typical|np-stress|cp-selector-typical|cp-selector-stress|cp-list-typical|cp-list-stress|mixed-typical|mixed-stress|fast|full|custom and KUBECONFIG_BENCH=/path/to/bench/kubeconfig.
 	@if [ "$(KUBECONFIG_BENCH)" = "$(HOME)/.kube/config" ]; then \
 		echo "refusing to run against default kubeconfig; set KUBECONFIG_BENCH=/path/to/bench/kubeconfig"; \
 		exit 1; \
