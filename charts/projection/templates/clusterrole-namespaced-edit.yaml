@@ -1,0 +1,32 @@
+{{- if .Values.rbac.aggregate -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "projection.fullname" . }}-namespaced-edit
+  labels:
+    {{- include "projection.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+rules:
+  - apiGroups:
+      - projection.sh
+    resources:
+      - projections
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+      - deletecollection
+  # /status is operator-owned: editors get read-only access. Split into a
+  # separate rule so verb sets can diverge cleanly from the parent resource.
+  - apiGroups:
+      - projection.sh
+    resources:
+      - projections/status
+    verbs:
+      - get
+{{- end }}
