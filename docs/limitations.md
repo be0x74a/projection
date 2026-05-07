@@ -61,7 +61,7 @@ Some Kinds *look* like stripping candidates but aren't:
 
 `projection` ships with `--source-mode=allowlist` as the default (since v0.2). A source that does not carry `projection.sh/projectable: "true"` is silently treated as not projectable — the Projection (or ClusterProjection) reports `SourceResolved=False reason=SourceNotProjectable`, and no destination is written. This is the safer default in multi-tenant clusters (source owners must opt their objects in), but it's a UX cliff for first-time users who copy an example without reading the source-side requirement.
 
-If you're mirroring sources you don't control (third-party CRs, controller-managed Secrets) and can't add the annotation, flip the operator to `--source-mode=permissive` (Helm value `sourceMode: permissive`) — every source then becomes projectable unless explicitly vetoed with `projectable: "false"`. The trade-off is documented in [Concepts §7](concepts.md#7-source-projectability-policy).
+If you're mirroring sources you don't control (third-party CRs, controller-managed Secrets) and can't add the annotation, flip the operator to `--source-mode=permissive` (Helm value `sourceMode: permissive`) — every source then becomes projectable unless explicitly vetoed with `projectable: "false"`. The trade-off is documented in [Concepts §9](concepts.md#9-source-projectability-policy).
 
 ### Events live on `events.k8s.io/v1`, not `core/v1`
 
@@ -69,7 +69,7 @@ Since v0.2, the controller emits Kubernetes Events through `events.k8s.io/v1`. T
 
 ### RBAC narrowing is install-time, not per-source
 
-The chart's `supportedKinds` value lets cluster admins narrow the controller's `ClusterRole` to an explicit Kind allowlist (see [Security § 1](security.md#1-narrow-the-controllers-rbac-to-the-kinds-you-actually-mirror)). Changing the allowlist requires a Helm upgrade — there's no runtime path to grant the controller access to a new Kind without restarting. True dynamic RBAC narrowing per declared source Kind would require admission-webhook plumbing the controller doesn't have today; it's noted as future work in [Concepts § 7](concepts.md#7-source-projectability-policy).
+The chart's `supportedKinds` value lets cluster admins narrow the controller's `ClusterRole` to an explicit Kind allowlist (see [Security § 1](security.md#1-narrow-the-controllers-rbac-to-the-kinds-you-actually-mirror)). Changing the allowlist requires a Helm upgrade — there's no runtime path to grant the controller access to a new Kind without restarting. True dynamic RBAC narrowing per declared source Kind would require admission-webhook plumbing the controller doesn't have today; it's noted as future work in [Concepts § 9](concepts.md#9-source-projectability-policy).
 
 ### Pre-1.0 API surface
 

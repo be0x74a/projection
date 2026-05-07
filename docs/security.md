@@ -100,7 +100,7 @@ This is the property that makes the chart's defaults safe for tenant self-servic
 
 ## Source projectability policy
 
-The primary source-side defense is the **source projectability policy**, documented in detail in [Concepts § 7](concepts.md#7-source-projectability-policy). The defaults:
+The primary source-side defense is the **source projectability policy**, documented in detail in [Concepts § 9](concepts.md#9-source-projectability-policy). The defaults:
 
 - **`--source-mode=allowlist`** (default). Sources must carry the annotation `projection.sh/projectable: "true"` to be mirrored. A Projection or ClusterProjection pointing at an unannotated source gets `SourceResolved=False reason=SourceNotProjectable` in status.
 - **Source owner veto**: annotation value `"false"` is *always* honored regardless of mode. Post-hoc veto garbage-collects the existing destination(s).
@@ -331,7 +331,7 @@ Concretely: a subject with CRUD on `clusterprojections.projection.sh` can author
 - Fans the source out into any namespace, or every namespace via a broad `namespaceSelector`.
 - Renames the destination to a name the subject controls in their own namespace, where they can `kubectl get` it back.
 
-The source projectability policy ([Concepts § 7](concepts.md#7-source-projectability-policy)) is the per-source defense — sources have to opt in to being mirrored. But projectability is a *policy* control, not an isolation boundary: a privileged user who can also write the `projection.sh/projectable` annotation on sources (e.g. a cluster admin who can edit any object) can defeat it. So in the worst case, granting `<release>-projection-cluster-admin` to a tenant-scoped subject can become a path to disclosure of any source in the cluster that's been opted in.
+The source projectability policy ([Concepts § 9](concepts.md#9-source-projectability-policy)) is the per-source defense — sources have to opt in to being mirrored. But projectability is a *policy* control, not an isolation boundary: a privileged user who can also write the `projection.sh/projectable` annotation on sources (e.g. a cluster admin who can edit any object) can defeat it. So in the worst case, granting `<release>-projection-cluster-admin` to a tenant-scoped subject can become a path to disclosure of any source in the cluster that's been opted in.
 
 **Recommendations:**
 

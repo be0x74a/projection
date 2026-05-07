@@ -6,7 +6,7 @@ Every entry assumes you have already located the failing condition. If you haven
 
 Each entry begins with an **Applies to:** line so you can tell at a glance which CRD it pertains to. Most reasons fire on both; a few are specific to one or the other.
 
-For operator install/uninstall issues that are not condition failures (e.g. a `kubectl delete crd` that hangs after `helm uninstall`), see the [Troubleshooting section of the getting-started guide](getting-started.md#troubleshooting) — those are operator-lifecycle issues rather than per-CR conditions, so they live with the install/uninstall procedure. The [stuck CRD recovery](#stuck-crd-deletion--orphaned-finalizers) entry below covers the per-CR side of the same surface.
+For operator install/uninstall issues that are not condition failures (e.g. a `kubectl delete crd` that hangs after `helm uninstall`), see the [Troubleshooting section of the getting-started guide](getting-started.md#troubleshooting) — those are operator-lifecycle issues rather than per-CR conditions, so they live with the install/uninstall procedure. The [stuck CRD recovery](#stuck-crd-deletion-or-orphaned-finalizers) entry below covers the per-CR side of the same surface.
 
 ## Contents
 
@@ -30,7 +30,7 @@ For operator install/uninstall issues that are not condition failures (e.g. a `k
 
 **Operational recovery** — not a condition reason, but the procedures live here so you can find them:
 
-- [Stuck CRD deletion / orphaned finalizers](#stuck-crd-deletion--orphaned-finalizers)
+- [Stuck CRD deletion or orphaned finalizers](#stuck-crd-deletion-or-orphaned-finalizers)
 
 ## How to read events
 
@@ -341,7 +341,7 @@ You will see one Warning event per failed namespace, each carrying its own reaso
 
 ## Operational recovery
 
-### Stuck CRD deletion / orphaned finalizers
+### Stuck CRD deletion or orphaned finalizers
 
 **Applies to:** both CRDs.
 

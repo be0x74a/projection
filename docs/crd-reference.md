@@ -78,7 +78,7 @@ Note: there is no `spec.destination.namespace` and no `spec.destination.namespac
 
 | Field                       | Type                  | Notes                                                                       |
 | --------------------------- | --------------------- | --------------------------------------------------------------------------- |
-| `status.conditions`         | `[]metav1.Condition`  | Standard conditions array. See [conditions](#conditions) below.              |
+| `status.conditions`         | `[]metav1.Condition`  | Standard conditions array. See [`status.conditions` (both CRDs)](#statusconditions-both-crds) below. |
 | `status.destinationName`    | string                | The resolved destination name (after rename). Populated after first successful write. |
 
 ## Print columns
