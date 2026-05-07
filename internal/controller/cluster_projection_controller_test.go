@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -142,7 +143,10 @@ var _ = Describe("ClusterProjection Controller (integration)", func() {
 			Expect(k8sClient.Create(ctx, cp)).To(Succeed())
 			DeferCleanup(deleteClusterProjection, cpName)
 
+			before := testutil.ToFloat64(reconcileTotal.WithLabelValues(kindClusterProjection, resultSuccess))
 			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+			Expect(testutil.ToFloat64(reconcileTotal.WithLabelValues(kindClusterProjection, resultSuccess))-before).
+				To(BeNumerically(">=", 1), "success counter should have incremented for kind=ClusterProjection")
 
 			// Every targeted namespace has the destination with our ownership stamps.
 			for _, ns := range []string{ns1, ns2, ns3} {
