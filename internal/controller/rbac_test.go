@@ -43,8 +43,10 @@ package controller
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -92,10 +94,10 @@ func renderChartClusterRoles() (edit, view, clusterAdmin *rbacv1.ClusterRole) {
 		if err := dec.Decode(&cr); err != nil {
 			break
 		}
+		// helm renders many kinds; the YAML decoder populates cr.Kind from
+		// the document's `kind:` field. Skip everything that isn't a
+		// ClusterRole.
 		if cr.Kind != "ClusterRole" {
-			// helm renders many kinds; we only care about ClusterRoles.
-			// Any non-ClusterRole document still partially populates a
-			// ClusterRole struct (with empty Kind), so skip it.
 			continue
 		}
 		switch cr.Name {
@@ -108,6 +110,19 @@ func renderChartClusterRoles() (edit, view, clusterAdmin *rbacv1.ClusterRole) {
 		case rbacChartClusterAdmin:
 			c := cr
 			clusterAdmin = &c
+		default:
+			// Tripwire: if the chart adds a new aggregating/end-user role,
+			// the matrix below must grow to cover it. Fail loudly so the
+			// next maintainer notices instead of silently leaving the new
+			// role unverified.
+			if strings.HasPrefix(cr.Name, rbacReleaseName+"-projection-") &&
+				cr.Name != rbacReleaseName+"-projection-manager" &&
+				cr.Name != rbacReleaseName+"-projection-metrics-reader" {
+				Fail(fmt.Sprintf(
+					"chart rendered an unrecognized end-user ClusterRole %q; "+
+						"add a matrix row in rbac_test.go (or extend this allowlist)",
+					cr.Name))
+			}
 		}
 	}
 
@@ -168,6 +183,11 @@ func applyClusterRoleBinding(name, role string, subjects []rbacv1.Subject) {
 		Subjects: subjects,
 	}
 	err := k8sClient.Create(ctx, binding)
+	// AlreadyExists is treated as no-op: envtest is fresh per `make test`,
+	// so this branch is unreachable in practice. If a future test reuses
+	// this binding name with different subjects/roleRef, switch to a
+	// Get+Update fallback (mirroring applyClusterRole) — the current
+	// behavior would silently use the stale binding.
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		Expect(err).NotTo(HaveOccurred(), "create ClusterRoleBinding %q", name)
 	}
@@ -201,11 +221,15 @@ func userSubject(name string) rbacv1.Subject {
 // runSAR issues a SubjectAccessReview against the test apiserver and
 // returns the populated status. envtest's apiserver doesn't authenticate
 // the requester (it trusts whatever User the SAR carries), so arbitrary
-// identifiers like "alice" work.
+// identifiers like "alice" work. Groups are set to {"system:authenticated"}
+// so the test mirrors real-cluster RBAC evaluation, which implicitly
+// adds every authenticated identity to that group; bindings that target
+// it will then resolve as they would in production.
 func runSAR(user, namespace, verb, group, resource string) authorizationv1.SubjectAccessReviewStatus {
 	sar := &authorizationv1.SubjectAccessReview{
 		Spec: authorizationv1.SubjectAccessReviewSpec{
-			User: user,
+			User:   user,
+			Groups: []string{"system:authenticated"},
 			ResourceAttributes: &authorizationv1.ResourceAttributes{
 				Namespace: namespace,
 				Verb:      verb,
@@ -368,7 +392,6 @@ var _ = Describe("Chart RBAC matrix", Ordered, func() {
 	}
 
 	for _, row := range rows {
-		row := row // capture
 		It(row.name, func() {
 			status := runSAR(row.user, row.namespace, row.verb, row.group, row.resource)
 			if row.allow {
