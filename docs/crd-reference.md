@@ -1,25 +1,46 @@
 # CRD behavior and examples
 
-This page covers cross-field invariants, controller-side condition reasons, the finalizer/annotation the operator manages, and fully worked YAML examples for `projection.sh/v1` `Projection`. For the field-by-field API schema — types, validation rules, defaults — see the auto-generated [API reference](api-reference.md), which is regenerated from `api/v1/projection_types.go` by `make docs-ref` and verified in CI.
+This page covers cross-field invariants, controller-side condition reasons, the finalizers/annotations the operator manages, and fully worked YAML examples for both CRDs in `projection.sh/v1`. For the field-by-field API schema — types, validation rules, defaults — see the auto-generated [API reference](api-reference.md), which is regenerated from `api/v1/*.go` by `make docs-ref` and verified in CI.
 
-- **API group**: `projection.sh`
-- **API version**: `v1` (storage version; stability commitments documented in [API stability](api-stability.md))
-- **Kind**: `Projection`
-- **Scope**: Namespaced
+`projection.sh/v1` ships two CRDs:
 
-## `source.apiVersion` forms
+| CRD                 | Scope       | Short name | Destinations                                       |
+| ------------------- | ----------- | ---------- | -------------------------------------------------- |
+| `Projection`        | Namespaced  | `proj`     | Single — Projection's own `metadata.namespace`.    |
+| `ClusterProjection` | Cluster     | `cproj`    | Fan-out — explicit list, or selector.              |
 
-`source.apiVersion` accepts three forms:
+Both CRDs share the same `source`, `overlay`, ownership keys (with different suffixes), and reconcile model. Apiserver floor is **Kubernetes ≥ 1.32**, required by the CEL admission rules below.
 
-| Form       | Semantics                                               |
-| ---------- | ------------------------------------------------------- |
-| `v1`       | Core group, pinned to v1.                               |
-| `apps/v1`  | Named group, pinned to v1.                              |
-| `apps/*`   | Named group, RESTMapper-preferred served version.       |
+## `source` (shared)
 
-The pinned forms (e.g. `v1`, `apps/v1`) lock the projection to an exact version — useful as a stability anchor when a CRD is mid-migration and you don't yet trust the new version. The unpinned form `<group>/*` follows the cluster: when a CRD author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than reporting `SourceResolutionFailed` and garbage-collecting destinations. The unpinned form is the recommended default for sources outside the core group, and especially valuable for CRDs. The same syntax works for any named group — `apps/*`, `networking.k8s.io/*`, `example.com/*`.
+The `SourceRef` struct is the same for both CRDs:
 
-The `*` sentinel is invalid without a group prefix (there is no unpinned form for the core group, which has stable versions). The regex accepts `*` for simplicity; the reconciler rejects the bare `*` case and reports `SourceResolved=False reason=SourceResolutionFailed`.
+| Field               | Type   | Required | Notes                                                                              |
+| ------------------- | ------ | -------- | ---------------------------------------------------------------------------------- |
+| `source.group`      | string | yes (may be empty) | `""` for the core API; otherwise a DNS-subdomain group name.            |
+| `source.version`    | string | conditional       | Required when `source.group == ""`. Optional otherwise.                  |
+| `source.kind`       | string | yes      | PascalCase. Pattern-validated.                                                     |
+| `source.namespace`  | string | yes      | DNS-1123. Source must be a namespaced object.                                      |
+| `source.name`       | string | yes      | DNS-1123.                                                                          |
+
+### `source` CEL rule
+
+```
+size(self.group) != 0 || size(self.version) != 0
+```
+
+If the group is empty (core API), the version field must be set. Setting `group: ""` and leaving `version` empty fails at `kubectl apply` with a CEL violation.
+
+For non-core groups, omitting `version` triggers preferred-version lookup via the `RESTMapper`. Pinning a specific version (`group: apps`, `version: v1`) locks the projection to that version regardless of CRD promotions in the cluster.
+
+### `source.version` semantics
+
+| Form                                | Resolution                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------ |
+| `group: ""`, `version: v1`          | Core group, pinned to v1. (Only form for core.)                                |
+| `group: apps`, `version: v1`        | Named group, pinned to v1.                                                     |
+| `group: apps` (`version` omitted)   | Named group, RESTMapper-preferred served version. Follows CRD promotions.      |
+| `group: ""` (`version` omitted)     | Rejected by CEL admission.                                                     |
 
 The resolved version is surfaced in the `SourceResolved` condition message:
 
@@ -28,84 +49,258 @@ kubectl get projection <name> -o jsonpath='{.status.conditions[?(@.type=="Source
 # → resolved apps/Deployment to preferred version v1
 ```
 
-Examples:
+The unpinned form is the recommended default for sources outside the core group, especially valuable for CRDs: when an author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than reporting `SourceResolutionFailed` and garbage-collecting destinations.
+
+---
+
+# `Projection` (namespaced)
+
+- **API group**: `projection.sh`
+- **API version**: `v1` (storage version; stability commitments documented in [API stability](api-stability.md))
+- **Kind**: `Projection`
+- **Scope**: Namespaced
+- **Short name**: `proj`
+
+A `Projection` mirrors one source object into the Projection's own namespace.
+
+## Spec
+
+| Field                    | Type        | Required | Notes                                                  |
+| ------------------------ | ----------- | -------- | ------------------------------------------------------ |
+| `spec.source`            | `SourceRef` | yes      | See [`source` (shared)](#source-shared) above.         |
+| `spec.destination.name`  | string      | no       | Rename override. Defaults to `source.name`.            |
+| `spec.overlay.labels`    | map[string]string | no | Labels merged on top of source metadata. Overlay wins. |
+| `spec.overlay.annotations` | map[string]string | no | Annotations merged on top of source metadata. Overlay wins. |
+
+Note: there is no `spec.destination.namespace` and no `spec.destination.namespaceSelector`. The destination namespace is **always** the Projection's own `metadata.namespace`. Use `ClusterProjection` for fan-out across multiple namespaces.
+
+## Status
+
+| Field                       | Type                  | Notes                                                                       |
+| --------------------------- | --------------------- | --------------------------------------------------------------------------- |
+| `status.conditions`         | `[]metav1.Condition`  | Standard conditions array. See [conditions](#conditions) below.              |
+| `status.destinationName`    | string                | The resolved destination name (after rename). Populated after first successful write. |
+
+## Print columns
+
+`kubectl get projections` (and `-A`, also as `proj`) surfaces:
+
+| Column             | JSONPath                                                          | Default? |
+| ------------------ | ----------------------------------------------------------------- | -------- |
+| `Kind`             | `.spec.source.kind`                                               | yes      |
+| `Source-Group`     | `.spec.source.group`                                              | with `-o wide` (priority=1) |
+| `Source-Namespace` | `.spec.source.namespace`                                          | yes      |
+| `Source-Name`      | `.spec.source.name`                                               | yes      |
+| `Destination`      | `.status.destinationName`                                         | yes      |
+| `Ready`            | `.status.conditions[?(@.type=='Ready')].status`                   | yes      |
+| `Age`              | `.metadata.creationTimestamp`                                     | yes      |
+
+`Destination` reflects the **resolved** destination name from status — the rename applied (or the source name when no rename is set), populated after the first successful write.
+
+## Worked example
 
 ```yaml
-# Mirror a ConfigMap (core group, pinned)
-source:
-  apiVersion: v1
-  kind: ConfigMap
+apiVersion: projection.sh/v1
+kind: Projection
+metadata:
+  name: app-config-mirror
+  namespace: tenant-a            # destination namespace = this
+spec:
+  source:
+    group: ""
+    version: v1
+    kind: ConfigMap
+    namespace: platform
+    name: app-config
+  destination:
+    name: shared-app-config      # optional rename; defaults to source.name
+  overlay:
+    labels:
+      tenant: tenant-a
+      projected-by: projection
+    annotations:
+      mirror.example.com/source: platform/app-config
+status:
+  destinationName: shared-app-config
+  conditions:
+    - type: SourceResolved
+      status: "True"
+      reason: Resolved
+      message: ""
+      lastTransitionTime: "2026-05-07T10:00:00Z"
+    - type: DestinationWritten
+      status: "True"
+      reason: Projected
+      message: ""
+      lastTransitionTime: "2026-05-07T10:00:00Z"
+    - type: Ready
+      status: "True"
+      reason: Projected
+      message: ""
+      lastTransitionTime: "2026-05-07T10:00:00Z"
 ```
+
+---
+
+# `ClusterProjection` (cluster-scoped)
+
+- **API group**: `projection.sh`
+- **API version**: `v1`
+- **Kind**: `ClusterProjection`
+- **Scope**: Cluster
+- **Short name**: `cproj`
+
+A `ClusterProjection` is fan-out only: it writes the same destination object into multiple namespaces, either an explicit list or every namespace matching a label selector.
+
+## Spec
+
+| Field                                | Type                | Required          | Notes                                                                                  |
+| ------------------------------------ | ------------------- | ----------------- | -------------------------------------------------------------------------------------- |
+| `spec.source`                        | `SourceRef`         | yes               | See [`source` (shared)](#source-shared) above.                                         |
+| `spec.destination.namespaces`        | `[]string` (set)    | conditional       | Explicit target namespace list. `+listType=set`, `minItems=1`. Mutex with `namespaceSelector`. |
+| `spec.destination.namespaceSelector` | `metav1.LabelSelector` | conditional    | Match every namespace whose labels satisfy the selector. Mutex with `namespaces`.      |
+| `spec.destination.name`              | string              | no                | Rename override applied in every target namespace. Defaults to `source.name`.          |
+| `spec.overlay.labels`                | map[string]string   | no                | Labels merged on top of source metadata. Overlay wins.                                 |
+| `spec.overlay.annotations`           | map[string]string   | no                | Annotations merged on top of source metadata. Overlay wins.                            |
+
+## CEL admission rules on `spec.destination`
+
+Two rules are enforced at admission time:
+
+```
+!(has(self.namespaces) && has(self.namespaceSelector))
+```
+
+`namespaces` and `namespaceSelector` are mutually exclusive — setting both is rejected.
+
+```
+has(self.namespaces) || has(self.namespaceSelector)
+```
+
+At least one must be set — empty `destination` is rejected.
+
+`namespaces` carries `+listType=set` (no duplicates) and `minItems=1` (cannot be the empty list). The `minItems` rule is what keeps `namespaces: []` from satisfying the at-least-one rule.
+
+## Status
+
+| Field                          | Type                  | Notes                                                                       |
+| ------------------------------ | --------------------- | --------------------------------------------------------------------------- |
+| `status.conditions`            | `[]metav1.Condition`  | Standard conditions array.                                                  |
+| `status.destinationName`       | string                | The resolved destination name (after rename). Populated after first successful write. |
+| `status.namespacesWritten`     | int32                 | Count of target namespaces where the destination was successfully written on the last reconcile. |
+| `status.namespacesFailed`      | int32                 | Count of target namespaces where the write failed on the last reconcile. Per-namespace detail surfaces via Events. |
+
+## Print columns
+
+`kubectl get clusterprojections` (also as `cproj`) surfaces:
+
+| Column             | JSONPath                                                                      | Default? |
+| ------------------ | ----------------------------------------------------------------------------- | -------- |
+| `Kind`             | `.spec.source.kind`                                                           | yes      |
+| `Source-Group`     | `.spec.source.group`                                                          | with `-o wide` (priority=1) |
+| `Source-Namespace` | `.spec.source.namespace`                                                      | yes      |
+| `Source-Name`      | `.spec.source.name`                                                           | yes      |
+| `Destination`      | `.status.destinationName`                                                     | yes      |
+| `Targets`          | `.status.namespacesWritten`                                                   | yes      |
+| `Failed`           | `.status.namespacesFailed`                                                    | with `-o wide` (priority=1) |
+| `Selector`         | `.spec.destination.namespaceSelector.matchLabels`                             | with `-o wide` (priority=1) |
+| `Ready`            | `.status.conditions[?(@.type=='Ready')].status`                               | yes      |
+| `Age`              | `.metadata.creationTimestamp`                                                 | yes      |
+
+`Selector` is empty for list-based ClusterProjections; `Targets` shows the count for either form.
+
+## Worked example: explicit list
 
 ```yaml
-# Mirror a Deployment (named group, pinned)
-source:
-  apiVersion: apps/v1
-  kind: Deployment
+apiVersion: projection.sh/v1
+kind: ClusterProjection
+metadata:
+  name: shared-config-fanout
+spec:
+  source:
+    group: ""
+    version: v1
+    kind: ConfigMap
+    namespace: platform
+    name: app-config
+  destination:
+    namespaces:
+      - tenant-a
+      - tenant-b
+      - tenant-c
+    name: shared-app-config       # optional rename; same name applied in each target
+  overlay:
+    labels:
+      projected-by: projection
+status:
+  destinationName: shared-app-config
+  namespacesWritten: 3
+  namespacesFailed: 0
+  conditions:
+    - type: SourceResolved
+      status: "True"
+      reason: Resolved
+      message: ""
+      lastTransitionTime: "2026-05-07T10:00:00Z"
+    - type: DestinationWritten
+      status: "True"
+      reason: Projected
+      message: ""
+      lastTransitionTime: "2026-05-07T10:00:00Z"
+    - type: Ready
+      status: "True"
+      reason: Projected
+      message: ""
+      lastTransitionTime: "2026-05-07T10:00:00Z"
 ```
+
+## Worked example: selector
 
 ```yaml
-# Mirror a custom resource, following the cluster's preferred version
-source:
-  apiVersion: example.com/*
-  kind: Widget
+apiVersion: projection.sh/v1
+kind: ClusterProjection
+metadata:
+  name: shared-config-fanout
+spec:
+  source:
+    group: ""
+    version: v1
+    kind: ConfigMap
+    namespace: platform
+    name: app-config
+  destination:
+    namespaceSelector:
+      matchLabels:
+        projection.sh/mirror: "true"
+    name: shared-app-config
+  overlay:
+    labels:
+      projected-by: projection
 ```
 
-## Destination invariants
+Every namespace carrying the label `projection.sh/mirror=true` gets a copy. Adding the label to a new namespace triggers a reconcile and the destination appears; removing it deletes the destination.
 
-Setting both `namespace` and `namespaceSelector` is rejected by the reconciler with `DestinationWritten=False reason=InvalidSpec`. (This invariant is enforced controller-side rather than via CEL for cross-apiserver-version compatibility.)
+---
 
-When `namespaceSelector` is set, the controller projects into every matching namespace and cleans up destinations in namespaces that stop matching (e.g. a label is removed). Deletion of the Projection cleans up every owned destination across all namespaces.
+## `status.conditions` (both CRDs)
 
-Note: the destination `Kind` is always the same as the source `Kind` — there is no transformation.
-
-## Overlay invariants
-
-The controller always stamps `projection.sh/owned-by: <projection-ns>/<projection-name>` on the destination, regardless of overlay. Do not attempt to set this key via overlay — it will be overwritten by the controller on every reconcile.
-
-## `status.conditions`
-
-The standard `metav1.Condition` array. The controller maintains three condition types:
+Both CRDs use the standard `metav1.Condition` array. The controller maintains three condition types. The reasons are shared.
 
 | Type                 | True reason(s)       | False reason(s)                                                                                                   | Unknown reason(s)       |
 | -------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `SourceResolved`     | `Resolved`           | `SourceResolutionFailed` (RESTMapper can't find Kind, cluster-scoped Kind, or bare `*`), `SourceFetchFailed` (transient fetch error), `SourceDeleted` (source 404 — owned destinations cleaned up), `SourceOptedOut` (source has `projectable="false"`), `SourceNotProjectable` (allowlist mode, source missing `projectable="true"`) | —                       |
-| `DestinationWritten` | `Projected`          | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`, `NamespaceResolutionFailed`, `DestinationWriteFailed`, `InvalidSpec` | `SourceNotResolved`     |
+| `SourceResolved`     | `Resolved`           | `SourceResolutionFailed` (RESTMapper can't find Kind, cluster-scoped Kind), `SourceFetchFailed` (transient fetch error), `SourceDeleted` (source 404 — owned destinations cleaned up), `SourceOptedOut` (source has `projectable="false"`), `SourceNotProjectable` (allowlist mode, source missing `projectable="true"`) | —                       |
+| `DestinationWritten` | `Projected`          | `DestinationCreateFailed`, `DestinationUpdateFailed`, `DestinationFetchFailed`, `DestinationConflict`, `NamespaceResolutionFailed`, `DestinationWriteFailed` | `SourceNotResolved`     |
 | `Ready`              | `Projected`          | Mirrors whichever of `SourceResolved` or `DestinationWritten` failed, with the same reason and message            | —                       |
 
 `DestinationWritten=Unknown reason=SourceNotResolved` specifically means the source-side step failed, so a destination write was never attempted.
 
-For selector-based Projections, `DestinationWritten` is a rollup across all matched namespaces. If every matched namespace succeeds, the condition is `True`. If any fail, it's `False` with a reason from the failure set (or the generic `DestinationWriteFailed` when reasons differ across namespaces); the message lists the failed namespaces. Per-namespace detail is surfaced via Events.
+For `ClusterProjection`, `DestinationWritten` is a rollup across all target namespaces. If every target succeeds, the condition is `True`. If any fail, it's `False` with a reason from the failure set (or the generic `DestinationWriteFailed` when reasons differ across namespaces); the message lists the failed namespaces. `status.namespacesWritten` and `status.namespacesFailed` are the canonical counts. Per-namespace detail surfaces via Events.
 
-`DestinationWritten=False reason=InvalidSpec` means both `namespace` and `namespaceSelector` were set — fix the spec.
-`DestinationWritten=False reason=NamespaceResolutionFailed` means the label selector was malformed.
+`DestinationWritten=False reason=NamespaceResolutionFailed` means the label selector was malformed or namespace listing failed.
 
-## Printer columns
+> Note: pre-v0.3.0 surfaced `DestinationWritten=False reason=InvalidSpec` when the v0.2 mutex (`destination.namespace` xor `destination.namespaceSelector`) was violated at runtime. v0.3.0 removes that runtime check entirely — the namespaced `Projection` no longer has a destination-namespace mutex (its destination is always the Projection's own namespace), and the `ClusterProjection` mutex is enforced by CEL admission so a violation never reaches the reconciler.
 
-`kubectl get projections` (and `-A`) surfaces:
-
-| Column                 | JSONPath                                                     | Default? |
-| ---------------------- | ------------------------------------------------------------ | -------- |
-| `Kind`                 | `.spec.source.kind`                                          | yes      |
-| `Source-Namespace`     | `.spec.source.namespace`                                     | yes      |
-| `Source-Name`          | `.spec.source.name`                                          | yes      |
-| `Destination`          | `.spec.destination.name`                                     | yes      |
-| `Destination-Selector` | `.spec.destination.namespaceSelector.matchLabels`            | with `-o wide` (priority=1) |
-| `Ready`                | `.status.conditions[?(@.type=='Ready')].status`              | yes      |
-| `Age`                  | `.metadata.creationTimestamp`                                | yes      |
-
-The CRD also exposes the short name `proj`, so `kubectl get proj` works as a shorthand for `kubectl get projections`.
-
-## Finalizers and annotations the controller manages
-
-| Name                                      | Where                  | Purpose                                                                                          |
-| ----------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------ |
-| `projection.sh/finalizer`         | `Projection.metadata`  | Blocks deletion until the controller has cleaned up the destination object (if it still owns it). |
-| `projection.sh/owned-by`          | Destination annotations | Marks the destination as owned by `<projection-ns>/<projection-name>`. Used for conflict detection on every reconcile and before destination cleanup. |
-| `projection.sh/owned-by-uid`      | Destination labels      | The owning Projection's `metadata.uid`. Lets cleanup paths find owned destinations via a single cluster-wide `List(LabelSelector)` instead of walking namespaces. The annotation above is still verified after the label-driven list as a belt-and-braces guard. |
-| `projection.sh/projectable`       | Source annotations *(read by controller, written by source owners)* | Source-side opt-in/veto. `"true"` = opt-in (required under default `sourceMode=allowlist`). `"false"` = veto (always honored regardless of mode; flipping a previously-projected source to `"false"` garbage-collects the destination). Any other value is treated as "not opted in" under allowlist, "projectable by default" under permissive. |
-
-## Stripped fields by Kind
+## Stripped fields by Kind (both CRDs)
 
 Some Kinds carry apiserver-allocated spec fields the controller strips before writing the destination. These fields would either be rejected on create (`spec.clusterIP: field is immutable`) or carry meaningless values across namespaces. The current set:
 
@@ -120,70 +315,18 @@ On update, the controller copies these fields from the existing destination back
 
 If you hit `field is immutable` errors for a Kind not in the table above, the controller is likely missing an entry in `droppedSpecFieldsByGVK` — see [CONTRIBUTING.md](https://github.com/projection-operator/projection/blob/main/CONTRIBUTING.md#adding-a-kind-to-droppedspecfieldsbygvk) for the path to add one, and please [open an issue](https://github.com/projection-operator/projection/issues/new).
 
-## Fully-spelled-out example
+## Finalizers and ownership keys
 
-```yaml
-apiVersion: projection.sh/v1
-kind: Projection
-metadata:
-  name: app-config-to-tenant-a
-  namespace: platform
-spec:
-  source:
-    apiVersion: v1
-    kind: ConfigMap
-    name: app-config
-    namespace: platform
-  destination:
-    namespace: tenant-a
-    name: shared-app-config      # optional; defaults to source.name
-  overlay:
-    labels:
-      tenant: tenant-a
-      projected-by: projection
-    annotations:
-      mirror.example.com/source: platform/app-config
-status:
-  conditions:
-    - type: SourceResolved
-      status: "True"
-      reason: Resolved
-      message: ""
-      lastTransitionTime: "2026-04-13T10:00:00Z"
-    - type: DestinationWritten
-      status: "True"
-      reason: Projected
-      message: ""
-      lastTransitionTime: "2026-04-13T10:00:00Z"
-    - type: Ready
-      status: "True"
-      reason: Projected
-      message: ""
-      lastTransitionTime: "2026-04-13T10:00:00Z"
-```
+| Name                                                 | Where                       | Owner                | Purpose                                                                                          |
+| ---------------------------------------------------- | --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------ |
+| `projection.sh/finalizer`                            | `Projection.metadata`       | `Projection`         | Blocks deletion until the controller has cleaned up the destination (if it still owns it).      |
+| `projection.sh/cluster-finalizer`                    | `ClusterProjection.metadata`| `ClusterProjection`  | Blocks deletion until the controller has cleaned up every owned destination across the cluster. |
+| `projection.sh/owned-by-projection`                  | Destination annotations     | `Projection`         | Marks the destination as owned by `<projection-ns>/<projection-name>`. **Authoritative** ownership signal — checked on every write and delete. |
+| `projection.sh/owned-by-projection-uid`              | Destination labels          | `Projection`         | The owning Projection's `metadata.uid`. Used by destination-side watches and label-selector cleanup paths. **Watch hint only** — never trusted alone for access decisions; the annotation is verified after every label-driven list. |
+| `projection.sh/owned-by-cluster-projection`          | Destination annotations     | `ClusterProjection`  | Marks the destination as owned by `<cluster-projection-name>`. (No `<ns>/` prefix — ClusterProjection is cluster-scoped.) **Authoritative** ownership signal. |
+| `projection.sh/owned-by-cluster-projection-uid`      | Destination labels          | `ClusterProjection`  | The owning ClusterProjection's `metadata.uid`. Watch hint, same discipline as the namespaced UID label. |
+| `projection.sh/projectable`                          | Source annotations *(read by controller, written by source owners)* | (n/a) | Source-side opt-in/veto. `"true"` = opt-in (required under default `sourceMode=allowlist`). `"false"` = veto (always honored regardless of mode; flipping a previously-projected source to `"false"` garbage-collects every destination). Any other value is treated as "not opted in" under allowlist, "projectable by default" under permissive. |
 
-## Fan-out example (one source → many destinations)
+The controller always stamps the appropriate ownership annotation and UID label on the destination, regardless of overlay. Do not attempt to set these keys via overlay — they will be overwritten on every reconcile.
 
-```yaml
-apiVersion: projection.sh/v1
-kind: Projection
-metadata:
-  name: shared-config-fanout
-  namespace: platform
-spec:
-  source:
-    apiVersion: v1
-    kind: ConfigMap
-    name: shared-config
-    namespace: platform
-  destination:
-    # namespace is omitted — namespaceSelector picks the destinations
-    namespaceSelector:
-      matchLabels:
-        projection.sh/mirror: "true"
-  overlay:
-    labels:
-      projected-by: projection
-```
-
-Every namespace carrying the label `projection.sh/mirror=true` gets a copy. Adding or removing the label on a namespace triggers a reconcile (via the controller's namespace watch) and the destination set adjusts automatically.
+The discipline is: **annotation is authoritative, UID label is a watch hint.** The controller's `ensureDestWatch` registers a label-filtered watch on the destination GVK so that manual deletion of a destination triggers an immediate reconcile. Cleanup paths use the UID label for an indexed cluster-wide `List(LabelSelector)`, but every candidate's annotation is verified again before any write or delete. A malicious or accidental copy of the UID label onto a stranger's object would not let the controller touch it — the annotation wouldn't match.
