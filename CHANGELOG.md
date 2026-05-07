@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-07
+
+### ⚠ BREAKING CHANGES
+
+There is **no automatic migration path** for v0.2 → v0.3. The CRD shape changes are wide enough that a clean reinstall is the supported upgrade. Per the project's pre-1.0 stance there are no known adopters; operators carrying v0.2 Projection CRs must reapply them in the new shape.
+
+- **CRD split.** The single `Projection` kind is replaced by two CRDs:
+  - `Projection` (namespaced) — single-target. Always writes into the Projection's own `metadata.namespace`. The v0.2 fields `spec.destination.namespace` and `spec.destination.namespaceSelector` are GONE; only `spec.destination.name` (rename override) remains.
+  - `ClusterProjection` (cluster-scoped) — fan-out. Carries the multi-target shape that left namespaced `Projection`: `spec.destination.namespaces: [...]` (explicit list, `minItems=1`) XOR `spec.destination.namespaceSelector` (label selector). CEL admission enforces the mutex and that at least one is set.
+- **SourceRef shape.** `spec.source.apiVersion` is REMOVED. Replace with separate `spec.source.group` (empty string for the core group) and `spec.source.version` fields. `version` may be omitted on non-core groups so the controller resolves the RESTMapper-preferred served version on every reconcile (the unpinned form previously spelled `apps/*`); the core group requires `version` (CEL admission).
+- **Ownership keys renamed and split per CRD.** Destinations carry kind-specific keys so the two reconcilers cannot collide on the same object:
+  - Namespaced: annotation `projection.sh/owned-by` → `projection.sh/owned-by-projection` (value `<projection-namespace>/<projection-name>`); new label `projection.sh/owned-by-projection-uid`.
+  - Cluster: NEW annotation `projection.sh/owned-by-cluster-projection` (value `<cluster-projection-name>`, no `<ns>/` prefix because ClusterProjection is cluster-scoped); new label `projection.sh/owned-by-cluster-projection-uid`.
+- **New cluster-scoped finalizer.** `ClusterProjection` carries `projection.sh/cluster-finalizer`, distinct from the namespaced `projection.sh/finalizer`, so cleanup paths cannot cross-contaminate.
+- **`projection_reconcile_total` gained a `kind` label** (`Projection|ClusterProjection`) so dashboards can split namespaced vs cluster reconcile traffic. The addition is additive — pre-v0.3 PromQL like `sum(rate(projection_reconcile_total[5m]))` keeps working — but dashboards or alerts that materialize per-`result` series must update to `sum by (kind, result) (...)` to retain split-by-kind granularity. See [docs/api-stability.md](https://docs.projection.sh/api-stability/) for the full pre-1.0 metric-label stability carve-out.
+- **Removed sample.** `config/samples/projection_v1_projection_selector.yaml` (the v0.2 selector-fan-out sample on the now-namespaced `Projection`) is gone with the field. The selector fan-out lives on `ClusterProjection` and is illustrated by `examples/configmap-fan-out-selector.yaml`.
+
+### Added
+
+- **`ClusterProjection` CRD.** Cluster-scoped sibling of `Projection`, carrying both fan-out modes:
+  - `spec.destination.namespaces: [...]` — explicit destination list (`minItems=1`).
+  - `spec.destination.namespaceSelector` — `metav1.LabelSelector` resolved on every reconcile and re-resolved on namespace events.
+  - CEL admission enforces XOR + at-least-one. Status carries `namespacesWritten` / `namespacesFailed` int32 counts plus the standard `Ready` / `SourceResolved` / `DestinationWritten` conditions.
+- **`status.destinationName`** on both CRDs. Surfaces the resolved destination name (after applying `spec.destination.name` override or defaulting to `spec.source.name`) on the printcolumn so `kubectl get projections` displays it without chasing the source ref.
+- **`status.namespacesWritten` and `status.namespacesFailed`** (int32) on `ClusterProjection`, reporting the per-reconcile rollup counts. `namespacesFailed > 0` flips `DestinationWritten=False` with a (truncated) failure list in the condition message.
+- **`ensureDestWatch`** — shared label-filtered watch on each destination GVK, registered lazily on first use by either reconciler. Triggers immediate reconciliation when a destination is manually edited or deleted (including the `kubectl delete <destination>` path), instead of waiting for the periodic resync. Uses the new `projection.sh/owned-by-{projection,cluster-projection}-uid` labels as the indexed watch hint.
+- **Helm chart RBAC aggregation.** Three new ClusterRoles, gated by the new `rbac.aggregate` value (default `true`):
+  - `<release>-projection-namespaced-edit` — aggregates into `admin` and `edit` so namespace tenants can `create`/`update`/`delete` `projections.projection.sh` in their own namespaces via the standard cluster-aggregated roles.
+  - `<release>-projection-namespaced-view` — aggregates into `view` for read-only namespace tenants.
+  - `<release>-projection-cluster-admin` — does NOT aggregate. Bound explicitly via ClusterRoleBinding for cluster-admin operators who need to manage `clusterprojections.projection.sh`. Unaffected by the `rbac.aggregate` toggle (it is always rendered).
+  Setting `rbac.aggregate: false` suppresses only the two aggregated namespaced roles. The cluster-admin role is always rendered. End-to-end RBAC matrix verified by SubjectAccessReview tests in `internal/controller/rbac_test.go`.
+- **`examples/configmap-fan-out-list.yaml`** — explicit-list fan-out via `ClusterProjection.spec.destination.namespaces`. Companion to the existing `examples/configmap-fan-out-selector.yaml`.
+- **`projection_watched_dest_gvks`** Prometheus gauge — counts distinct destination GVKs the controller currently watches via `ensureDestWatch`. Companion to the existing `projection_watched_gvks` (source-side).
+
+### Changed
+
+- **`sourceKey` is now 4-part** (`group/kind/namespace/name`) — the version segment is dropped because source events always carry a resolved GVK while a Projection may reference its source via the unpinned form. Joining on the version-free key keeps both sides in agreement regardless of which served version the apiserver delivered the event for.
+
+### Removed
+
+- **v0.2 namespaced `Projection` selector / multi-target shape.** Both `spec.destination.namespace` and `spec.destination.namespaceSelector` are gone. The fan-out behavior migrated to `ClusterProjection`.
+- **`config/samples/projection_v1_projection_selector.yaml`** sample CR.
+
 ## [0.2.0] - 2026-05-05
 
 ### Project rebrand
