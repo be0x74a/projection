@@ -779,6 +779,53 @@ var _ = Describe("Projection Controller (integration)", func() {
 				"expected exactly one Warning SourceDeleted event, got: %v", events)
 		})
 	})
+
+	Context("Source never existed", func() {
+		It("emits SourceResolved=False reason=SourceNotFound when status.destinationName is empty", func() {
+			id := nextID()
+			ns := uniqueNS("mirror-srcnotfound")
+			projKey := types.NamespacedName{Name: "p-srcnotfound-" + id, Namespace: ns}
+			srcName := "never-existed-" + id
+
+			ensureNamespace(ns)
+			DeferCleanup(deleteProjection, projKey)
+
+			// No source is ever created — the Projection points at a
+			// name that doesn't exist in the cluster.
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Version: "v1", Kind: "ConfigMap",
+						Name: srcName, Namespace: ns,
+					},
+					Destination: projectionv1.ProjectionDestination{Name: "dst-" + id},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+
+			r := newReconciler()
+			_ = drainEvents(r)
+			reconcileOnce(r, projKey)
+
+			var fresh projectionv1.Projection
+			Expect(k8sClient.Get(ctx, projKey, &fresh)).To(Succeed())
+			Expect(fresh.Status.DestinationName).To(BeEmpty(),
+				"destinationName must remain empty when source never resolves")
+
+			srcResolved := findCondition(fresh.Status.Conditions, "SourceResolved")
+			Expect(srcResolved).NotTo(BeNil())
+			Expect(srcResolved.Status).To(Equal(metav1.ConditionFalse))
+			Expect(srcResolved.Reason).To(Equal("SourceNotFound"),
+				"never-resolved source should report SourceNotFound, not SourceDeleted")
+			Expect(srcResolved.Message).To(ContainSubstring("not found"),
+				"message should say 'not found', not 'has been deleted'")
+
+			events := drainEvents(r)
+			Expect(events).To(ContainElement(ContainSubstring("Warning SourceNotFound")),
+				"expected a Warning SourceNotFound event, got: %v", events)
+		})
+	})
 })
 
 var _ = Describe("Shared source watch (integration with manager)", Ordered, func() {

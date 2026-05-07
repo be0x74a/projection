@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A `Projection` or `ClusterProjection` whose source object was never created now reports `SourceResolved=False, reason=SourceNotFound, message="source X/Y not found"`. Previously every source-NotFound case was bucketed as `reason=SourceDeleted` with the message `"source X/Y has been deleted"` — accurate when the source had previously existed and was deleted, but a lie when the source never existed in the first place. The two cases are now distinguished by `status.destinationName`: empty (never resolved) → `SourceNotFound`; populated (we previously projected it) → `SourceDeleted`. The `SourceDeleted` reason value is unchanged for the genuine deletion case; alerts on `Ready=False` continue to fire for both reasons.
+
 ## [0.3.0] - 2026-05-07
 
 ### ⚠ BREAKING CHANGES
