@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="docs/assets/demo.cast">
-    <img src="docs/assets/demo.gif" alt="projection demo: apply a Projection, edit the source, watch the destination ConfigMap update in ~100ms" width="720">
+    <img src="docs/assets/demo.gif" alt="projection demo: namespace-tier Projection apply + source-edit propagation, cluster-tier ClusterProjection fan-out across three namespaces, and self-heal after kubectl-delete — all in ~90 seconds" width="720">
   </a>
 </p>
 

@@ -58,6 +58,12 @@ else
     "$KIND" create cluster --name "$CLUSTER" --image "$NODE_IMAGE"
 fi
 
+# `kind create cluster` sets the kubectl context, but reusing an existing
+# cluster does not — and other tools may have left current-context unset
+# or pointed elsewhere. Make the context explicit so helm and kubectl below
+# always hit the demo cluster.
+kubectl config use-context "kind-$CLUSTER" >/dev/null
+
 echo "==> building $IMAGE_TAG"
 make docker-build IMG="$IMAGE_TAG" >/dev/null
 
@@ -88,7 +94,7 @@ echo "==> recording asciicast to $CAST_OUT"
 asciinema rec "$CAST_OUT" \
     --command "bash hack/demo.sh" \
     --overwrite \
-    --title "projection — declarative resource mirroring"
+    --title "projection — namespace-tier and cluster-tier mirroring"
 
 echo "==> cast saved: $CAST_OUT"
 
