@@ -31,12 +31,13 @@ replicaCount: 1
 # values speed up developer feedback. Plumbed as --requeue-interval.
 requeueInterval: 30s
 
-# -- Maximum in-flight destination writes per selector-based Projection during
-# fan-out. Each worker issues a Get plus optionally a Create or Update against
-# the apiserver; HTTP/2 multiplexing in client-go shares a single connection
+# -- Maximum in-flight destination writes per selector-based ClusterProjection
+# during fan-out. Has no effect on namespaced Projection (single-target only).
+# Each worker issues a Get plus optionally a Create or Update against the
+# apiserver; HTTP/2 multiplexing in client-go shares a single connection
 # across the workers, so this caps parallelism rather than connections. The
 # default of 16 fits comfortably within typical kube-apiserver APF priority-
-# level budgets at production scale; raise it for Projections matching
+# level budgets at production scale; raise it for ClusterProjections matching
 # thousands of namespaces, lower it on apiserver-constrained clusters. Must
 # be > 0. Plumbed as --selector-write-concurrency.
 selectorWriteConcurrency: 16

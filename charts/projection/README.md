@@ -27,16 +27,16 @@ mirroring of Kubernetes resources:
   - `<release>-projection-namespaced-edit` ClusterRole — aggregates into the
     cluster-default `admin` and `edit` roles, granting namespace tenants
     `create`/`update`/`delete`/`patch` on `projections.projection.sh` in their
-    own namespaces. Read-only access to `clusterprojections.projection.sh` is
-    also included so tenants can `kubectl describe` cluster-scoped fan-outs
-    that target their namespace.
+    own namespaces. Does NOT grant any access to `clusterprojections.projection.sh`.
   - `<release>-projection-namespaced-view` ClusterRole — aggregates into the
     cluster-default `view` role, granting namespace tenants read-only access
-    to `projections.projection.sh` and `clusterprojections.projection.sh`.
+    to `projections.projection.sh` only.
   - `<release>-projection-cluster-admin` ClusterRole — full CRUD on
     `clusterprojections.projection.sh`. NOT aggregated; bind explicitly via
     ClusterRoleBinding to operators who manage cluster-scoped fan-out.
-    Always rendered regardless of the `rbac.aggregate` toggle.
+    Always rendered regardless of the `rbac.aggregate` toggle. Namespace
+    tenants are deliberately isolated from the cluster tier — viewing or
+    editing `ClusterProjection` requires this binding.
 - A namespaced Role / RoleBinding for leader election (leases + events) in the
   release namespace.
 - A ClusterIP Service exposing Prometheus metrics on port 8443 (HTTPS,
