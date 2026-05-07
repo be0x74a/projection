@@ -20,6 +20,9 @@ rules:
       - update
       - patch
       - delete
+      - deletecollection
+  # /status is operator-owned: editors get read-only access. Split into a
+  # separate rule so verb sets can diverge cleanly from the parent resource.
   - apiGroups:
       - projection.sh
     resources:

@@ -276,7 +276,7 @@ tests:
           value: [projections]
       - equal:
           path: rules[0].verbs
-          value: [get, list, watch, create, update, patch, delete]
+          value: [get, list, watch, create, update, patch, delete, deletecollection]
       - equal:
           path: rules[1].apiGroups
           value: [projection.sh]
@@ -363,7 +363,7 @@ tests:
           value: [clusterprojections]
       - equal:
           path: rules[0].verbs
-          value: [get, list, watch, create, update, patch, delete]
+          value: [get, list, watch, create, update, patch, delete, deletecollection]
       - equal:
           path: rules[1].apiGroups
           value: [projection.sh]
@@ -396,13 +396,20 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: suppresses cluster-admin when rbac.aggregate=false
+  - it: still renders cluster-admin when rbac.aggregate=false
+    # cluster-admin has no aggregation labels, so the rbac.aggregate flag
+    # (which controls aggregation) is orthogonal to its existence. It must
+    # always be present so cluster admins can bind it explicitly via
+    # ClusterRoleBinding regardless of the namespaced-tenant story.
     template: clusterrole-cluster-admin.yaml
     set:
       rbac.aggregate: false
     asserts:
       - hasDocuments:
-          count: 0
+          count: 1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-projection-cluster-admin
 
   # Regression guard: the manager ClusterRole — managed by the controller
   # team, untouched by this PR — must still grant CRUD on clusterprojections

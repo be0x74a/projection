@@ -134,7 +134,7 @@
         "aggregate": {
           "type": "boolean",
           "default": true,
-          "description": "When true, ship ClusterRoles with aggregation labels so the standard admin and edit roles in each namespace gain Projection CRUD on their own namespace, and the standard view role gains read access. Set to false to disable the aggregated ClusterRoles entirely (you can still bind the projection-cluster-admin role manually for ClusterProjection access)."
+          "description": "When true (default), ship the namespaced-edit and namespaced-view ClusterRoles carrying aggregation labels so the standard admin/edit roles in each namespace gain Projection CRUD and the standard view role gains read access. Set to false to suppress those two aggregated roles. The cluster-admin ClusterRole (for ClusterProjection access) is rendered unconditionally and must be bound explicitly."
         }
       }
     },

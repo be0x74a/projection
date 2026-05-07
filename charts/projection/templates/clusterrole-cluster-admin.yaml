@@ -1,16 +1,17 @@
-{{- if .Values.rbac.aggregate -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ include "projection.fullname" . }}-cluster-admin
   labels:
     {{- include "projection.labels" . | nindent 4 }}
-  # NOTE: deliberately NOT aggregated to any default role. ClusterProjection
-  # is cluster-scoped and can mirror any object across any namespace, so
-  # access to it must be granted explicitly by a cluster admin via a
-  # ClusterRoleBinding (or RoleBinding for read-only on a single namespace
-  # of subjects). Adding rbac.authorization.k8s.io/aggregate-to-* here
-  # would silently widen anyone with edit/admin into the cluster tier.
+  # NOTE: deliberately NOT aggregated to any default role, and rendered
+  # unconditionally (independent of rbac.aggregate). ClusterProjection is
+  # cluster-scoped and can mirror any object across any namespace, so
+  # access must be granted explicitly by a cluster admin via a
+  # ClusterRoleBinding. Adding rbac.authorization.k8s.io/aggregate-to-*
+  # here would silently widen edit/admin holders into the cluster tier;
+  # gating on rbac.aggregate would conflate "do I want aggregation labels?"
+  # with "do I want this role to exist?" — two orthogonal questions.
 rules:
   - apiGroups:
       - projection.sh
@@ -24,10 +25,10 @@ rules:
       - update
       - patch
       - delete
+      - deletecollection
   - apiGroups:
       - projection.sh
     resources:
       - clusterprojections/status
     verbs:
       - get
-{{- end }}
