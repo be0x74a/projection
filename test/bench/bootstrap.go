@@ -243,10 +243,16 @@ func buildClusterProjectionSelector(cpName, srcNs, srcName, srcKind, labelKey, l
 }
 
 // createClusterProjectionSelector creates a cluster-scoped ClusterProjection
-// using a namespaceSelector destination.
+// using a namespaceSelector destination. Idempotent: cluster-scoped CRs
+// outlive the namespaces that source/destination CRs live in, so a Ctrl-C'd
+// or partially-failed previous run can leak the deterministic-named CP, and
+// the next run must be able to re-create cleanly.
 func createClusterProjectionSelector(ctx context.Context, c *clients, cpName, srcNs, srcName, srcKind, labelKey, labelValue string) error {
 	cp := buildClusterProjectionSelector(cpName, srcNs, srcName, srcKind, labelKey, labelValue)
 	_, err := c.dynamic.Resource(cprojGVR).Create(ctx, cp, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		return nil
+	}
 	return err
 }
 
@@ -271,10 +277,14 @@ func buildClusterProjectionList(cpName, srcNs, srcName, srcKind string, namespac
 }
 
 // createClusterProjectionList creates a cluster-scoped ClusterProjection
-// using an explicit namespaces list destination.
+// using an explicit namespaces list destination. Idempotent for the same
+// reason as createClusterProjectionSelector.
 func createClusterProjectionList(ctx context.Context, c *clients, cpName, srcNs, srcName, srcKind string, namespaces []string) error {
 	cp := buildClusterProjectionList(cpName, srcNs, srcName, srcKind, namespaces)
 	_, err := c.dynamic.Resource(cprojGVR).Create(ctx, cp, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		return nil
+	}
 	return err
 }
 
@@ -393,6 +403,13 @@ func bootstrapNP(ctx context.Context, c *clients, p Profile, res *bootstrapResul
 // bootstrapCPSelector creates the CP-selector topology: a single source
 // namespace + source CR, p.SelectorNamespaces label-matched destination
 // namespaces, and one ClusterProjection with namespaceSelector destination.
+//
+// Both CP paths (selector and list) intentionally pin to GVK index 0 with a
+// single source CR. CP fan-out behavior — selector matching, namespace
+// iteration, list-driven distribution — is independent of source-GVK count;
+// exercising multiple GVKs is the NP path's job. mixed-* profiles drive
+// multi-GVK behavior through NP and fan-out behavior through CP without
+// redundancy.
 func bootstrapCPSelector(ctx context.Context, c *clients, p Profile, res *bootstrapResult) error {
 	if err := ensureNamespace(ctx, c, cpSelectorSrcNs, nil); err != nil {
 		return err

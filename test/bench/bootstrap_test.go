@@ -80,6 +80,13 @@ func TestBuildNamespacedProjection_V03Shape(t *testing.T) {
 	if got := dst["name"]; got != "src-1" {
 		t.Errorf("spec.destination.name: got %v, want %q", got, "src-1")
 	}
+	// Tightness: catch the case where a future builder change accidentally
+	// leaks an extra destination field (e.g. an Overlay field misrouted
+	// here). The only acceptable destination key on a namespaced Projection
+	// is `name`.
+	if got := len(dst); got != 1 {
+		t.Errorf("spec.destination should have exactly one field (name), got %d: %+v", got, dst)
+	}
 }
 
 func TestBuildClusterProjectionSelector_V03Shape(t *testing.T) {

@@ -279,9 +279,12 @@ func waitForStampAll(
 			return 0, 0, fmt.Errorf("timeout waiting for stamp %s on %d/%d destinations (missing: %v)",
 				stamp, total-len(seen), total, missing)
 		}
-		// Cluster-wide list of the bench GVK. The bench GVK is test-only, so
-		// the returned set is the one source object plus the N destinations;
-		// the wantNs filter discards the source.
+		// Cluster-wide list of the bench GVK. The name + wantNs filter
+		// discards everything not in our fan-out set; in mixed-* profiles
+		// the NP path also writes destinations of GVK index 0 in unrelated
+		// namespaces, which arrive in this list and are skipped by the
+		// name filter (NP names are src-N, CP fan-out names are the CP
+		// source name).
 		list, listErr := c.dynamic.Resource(gvr(gvkIdx)).List(ctx, metav1.ListOptions{})
 		if listErr != nil && !apierrors.IsNotFound(listErr) {
 			return 0, 0, listErr
