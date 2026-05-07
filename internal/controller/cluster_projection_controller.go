@@ -319,9 +319,13 @@ func summarizeFailures(total int, failureMsgs map[string]string) string {
 }
 
 // handleClusterSourceFetchError funnels source-fetch errors. A 404
-// (source deleted) cleans up every owned destination across all
-// namespaces and records SourceDeleted; other errors keep the existing
-// destinations in place and surface SourceFetchFailed.
+// cleans up every owned destination across all namespaces and surfaces
+// SourceResolved=False; other errors keep the existing destinations in
+// place and surface SourceFetchFailed. The 404 reason distinguishes two
+// cases by status.destinationName:
+//   - empty: never resolved — reason=SourceNotFound, "source X/Y not found".
+//   - populated: previously projected, destination was named —
+//     reason=SourceDeleted, "source X/Y has been deleted".
 func (r *ClusterProjectionReconciler) handleClusterSourceFetchError(
 	ctx context.Context,
 	cp *projectionv1.ClusterProjection,
@@ -335,9 +339,13 @@ func (r *ClusterProjectionReconciler) handleClusterSourceFetchError(
 	if cleanupErr := r.deleteAllClusterOwnedDestinations(ctx, cp, gvr); cleanupErr != nil {
 		logger.Error(cleanupErr, "cleaning up cluster destinations after source deletion")
 	}
-	return r.failClusterSource(ctx, cp, "SourceDeleted", "Get",
-		fmt.Sprintf("source %s/%s has been deleted",
-			cp.Spec.Source.Namespace, cp.Spec.Source.Name))
+	reason := "SourceNotFound"
+	msg := fmt.Sprintf("source %s/%s not found", cp.Spec.Source.Namespace, cp.Spec.Source.Name)
+	if cp.Status.DestinationName != "" {
+		reason = "SourceDeleted"
+		msg = fmt.Sprintf("source %s/%s has been deleted", cp.Spec.Source.Namespace, cp.Spec.Source.Name)
+	}
+	return r.failClusterSource(ctx, cp, reason, "Get", msg)
 }
 
 // ensureSourceWatch is the cluster-tier sibling of the namespaced version.

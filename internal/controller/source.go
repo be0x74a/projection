@@ -120,15 +120,19 @@ func formatGV(src projectionv1.SourceRef) string {
 }
 
 // handleSourceFetchError funnels errors from the source-object Get call.
-// A 404 is a distinct signal ("source has been deleted"): we clean up
-// every owned destination and surface SourceResolved=False
-// reason=SourceDeleted via failSource, which emits a single Warning
-// SourceDeleted event (matches the SourceOptedOut / SourceNotProjectable
-// opt-out precedent). Cleanup errors are logged but do not block the
-// status update — same opt-out cleanup pattern used when a source stops
-// being projectable. All other errors (transient connectivity, RBAC
-// blips, 5xx) keep the SourceFetchFailed behavior and leave destinations
-// in place.
+// A 404 is a distinct signal: we clean up every owned destination and
+// surface SourceResolved=False via failSource, which emits a single
+// Warning event (matches the SourceOptedOut / SourceNotProjectable opt-out
+// precedent). The reason distinguishes two cases by status.destinationName:
+//   - empty: the source was never resolved successfully — reason=SourceNotFound,
+//     "source X/Y not found".
+//   - populated: we previously projected this source and the destination
+//     was named — reason=SourceDeleted, "source X/Y has been deleted".
+//
+// Cleanup errors are logged but do not block the status update — same
+// opt-out cleanup pattern used when a source stops being projectable.
+// All other errors (transient connectivity, RBAC blips, 5xx) keep the
+// SourceFetchFailed behavior and leave destinations in place.
 func (r *ProjectionReconciler) handleSourceFetchError(ctx context.Context, proj *projectionv1.Projection, gvr schema.GroupVersionResource, err error) (ctrl.Result, error) {
 	if !apierrors.IsNotFound(err) {
 		return r.failSource(ctx, proj, "SourceFetchFailed", "Get", err.Error())
@@ -137,9 +141,13 @@ func (r *ProjectionReconciler) handleSourceFetchError(ctx context.Context, proj 
 	if cleanupErr := r.deleteAllOwnedDestinations(ctx, proj, gvr); cleanupErr != nil {
 		logger.Error(cleanupErr, "cleaning up destinations after source deletion")
 	}
-	return r.failSource(ctx, proj, "SourceDeleted", "Get",
-		fmt.Sprintf("source %s/%s has been deleted",
-			proj.Spec.Source.Namespace, proj.Spec.Source.Name))
+	reason := "SourceNotFound"
+	msg := fmt.Sprintf("source %s/%s not found", proj.Spec.Source.Namespace, proj.Spec.Source.Name)
+	if proj.Status.DestinationName != "" {
+		reason = "SourceDeleted"
+		msg = fmt.Sprintf("source %s/%s has been deleted", proj.Spec.Source.Namespace, proj.Spec.Source.Name)
+	}
+	return r.failSource(ctx, proj, reason, "Get", msg)
 }
 
 // checkProjectable decides whether a freshly-fetched source object is

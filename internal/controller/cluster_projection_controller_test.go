@@ -572,6 +572,49 @@ var _ = Describe("ClusterProjection Controller (integration)", func() {
 		})
 	})
 
+	Context("Source never existed", func() {
+		It("emits SourceResolved=False reason=SourceNotFound when status.destinationName is empty", func() {
+			cpName := uniqueCPName("cp-srcnotfound")
+			srcNS := uniqueNS("cp-srcnotfound-src")
+			ns1 := uniqueNS("cp-srcnotfound-1")
+
+			ensureNamespace(srcNS)
+			ensureNamespace(ns1)
+
+			// Source is never created — the ClusterProjection points at
+			// a name that doesn't exist.
+			cp := &projectionv1.ClusterProjection{
+				ObjectMeta: metav1.ObjectMeta{Name: cpName},
+				Spec: projectionv1.ClusterProjectionSpec{
+					Source: projectionv1.SourceRef{
+						Version: "v1", Kind: "ConfigMap",
+						Name: "never-existed", Namespace: srcNS,
+					},
+					Destination: projectionv1.ClusterProjectionDestination{
+						Namespaces: []string{ns1},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cp)).To(Succeed())
+			DeferCleanup(deleteClusterProjection, cpName)
+
+			reconcileClusterOnce(r, types.NamespacedName{Name: cpName})
+
+			fresh := &projectionv1.ClusterProjection{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cpName}, fresh)).To(Succeed())
+			Expect(fresh.Status.DestinationName).To(BeEmpty(),
+				"destinationName must remain empty when source never resolves")
+
+			sr := apimeta.FindStatusCondition(fresh.Status.Conditions, conditionSourceResolved)
+			Expect(sr).NotTo(BeNil())
+			Expect(sr.Status).To(Equal(metav1.ConditionFalse))
+			Expect(sr.Reason).To(Equal("SourceNotFound"),
+				"never-resolved source should report SourceNotFound, not SourceDeleted")
+			Expect(sr.Message).To(ContainSubstring("not found"),
+				"message should say 'not found', not 'has been deleted'")
+		})
+	})
+
 	Context("Empty namespace selector footgun", func() {
 		It("rejects a ClusterProjection with namespaceSelector: {} and writes no destinations", func() {
 			cpName := uniqueCPName("cp-empty-sel")
