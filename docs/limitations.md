@@ -1,14 +1,32 @@
 # Limitations & roadmap
 
-`projection` is pre-1.0. The CRD is at `projection.sh/v1`, and the surface that will be frozen at v1.0.0 is documented in [API stability](api-stability.md). Pre-1.0 minor releases can carry breaking changes — v0.2 ships three (default `sourceMode` flip, Events moved to `events.k8s.io/v1`, the new `namespaceSelector` field) listed in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md). This page is the standing list of "things that don't work today" and the rough roadmap for closing the gaps.
+`projection` is pre-1.0. The CRDs are at `projection.sh/v1`, and the surface that will be frozen at v1.0.0 is documented in [API stability](api-stability.md). Pre-1.0 minor releases can carry breaking changes — v0.3 ships several (the `Projection` / `ClusterProjection` split, `source.apiVersion` replaced with `source.group` + `source.version`, ownership-annotation renames, the `kind` label on `projection_reconcile_total`) listed in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md). This page is the standing list of "things that don't work today" and the rough roadmap for closing the gaps.
 
 ## Known limitations
 
+### Namespaced `Projection` cannot write outside its own namespace
+
+A `Projection` mirrors its source into the Projection's own `metadata.namespace`. There is no `destination.namespace` field on `Projection` — the only knob on `destination` is the optional `name` rename. This is a deliberate tenant-safety property: a namespace-scoped RBAC rule on `projections.projection.sh` becomes a structural confinement boundary, because a Projection author cannot escape their own namespace by editing the spec. A platform team that grants `tenant-a` CRUD on `Projection` resources in `tenant-a` knows that whatever Projections that tenant authors will write into `tenant-a`, never into a peer tenant's namespace.
+
+If you need cross-namespace mirroring, use a `ClusterProjection`. ClusterProjection is cluster-scoped and writes destinations into an explicit list of namespaces (`destination.namespaces: [a, b, c]`) or every namespace matching a `destination.namespaceSelector`. Because the same RBAC story would otherwise undermine tenant safety, the chart does **not** aggregate `clusterprojections` CRUD into the standard admin/edit roles — see the next limitation.
+
+### `ClusterProjection` requires cluster-admin authority to create
+
+The Helm chart ships three ClusterRoles: `<release>-projection-namespaced-edit` and `<release>-projection-namespaced-view` (both aggregated into the standard Kubernetes admin/edit/view roles by default — see [`rbac.aggregate`](security.md#rbac-aggregation-defaults)) and `<release>-projection-cluster-admin` (NOT aggregated, by design). Only the third role grants CRUD on `clusterprojections.projection.sh`, and it must be explicitly bound by a cluster admin via a ClusterRoleBinding to the subjects who should hold that authority.
+
+This is a deliberate footgun avoidance: ClusterProjection writes across namespaces, so silently aggregating it into the standard `admin` role would widen everyone with namespace-admin authority into cluster-tier reach. If you want a tenant or service account to be able to create ClusterProjections, you have to mean it. See [Security](security.md#why-projection-cluster-admin-is-not-aggregated).
+
+### No mixed-mode in one CR
+
+`Projection` is single-target only (one source → one destination, in the Projection's own namespace). `ClusterProjection` is fan-out only (one source → N destinations, across selected namespaces). The two shapes do not combine within a single CR — there is no "single-target with optional fan-out" or "fan-out with one of the targets in a different cluster role." If you genuinely need both shapes for the same source, create both CRs explicitly: a `Projection` in the home namespace plus a `ClusterProjection` for the fan-out destinations.
+
+The split is intentional. Each shape has its own status surface (the namespaced CRD has none of the fan-out counters; the cluster CRD doesn't pretend it can target a single namespace cleanly), its own RBAC tier (namespace-scoped vs cluster-scoped), and its own ownership-annotation key. Combining them would muddle every one of those.
+
 ### Selector fan-out applies the same overlay to every destination
 
-A `Projection` with `spec.destination.namespaceSelector` mirrors its source into every matching namespace and rolls up status into a single `DestinationWritten` condition — see the [fan-out example](https://github.com/projection-operator/projection/blob/main/examples/configmap-fan-out-selector.yaml). The `overlay` block applies uniformly: every destination gets the same labels and annotations.
+A `ClusterProjection` with `destination.namespaceSelector` mirrors its source into every matching namespace and rolls up status into a single `DestinationWritten` condition (with `status.namespacesWritten` and `status.namespacesFailed` carrying the counts). The `overlay` block applies uniformly: every destination gets the same labels and annotations.
 
-If you need **distinct overlays per destination** (different `tenant:` labels, per-namespace annotations, etc.), write one `Projection` per destination instead — see the [multi-destination example](https://github.com/projection-operator/projection/blob/main/examples/multiple-destinations-from-one-source.yaml). That pattern also keeps per-destination status independent: a `DestinationConflict` in one namespace doesn't mark the others as failed.
+If you need **distinct overlays per destination** (different `tenant:` labels, per-namespace annotations, etc.), write one `Projection` per destination instead — one CR per home namespace, each with its own overlay. That pattern also keeps per-destination status independent: a `DestinationConflict` in one namespace doesn't mark the others as failed.
 
 ### Same-cluster only
 
@@ -37,21 +55,17 @@ Some Kinds *look* like stripping candidates but aren't:
 
 ### Namespaced resources only
 
-`projection` mirrors only **namespaced** resources (`ConfigMap`, `Secret`, `Service`, `Deployment`, most CRs, etc.). A `Projection` that points at a cluster-scoped Kind (`Namespace`, `ClusterRole`, `ClusterRoleBinding`, `StorageClass`, `CustomResourceDefinition`, `PriorityClass`, …) fails fast with `SourceResolved=False` and the message `<apiVersion>/<Kind> is cluster-scoped; projection only mirrors namespaced resources`. There's no use case that motivated cluster-scoped support so far (there can only be one `Namespace` with a given name in a cluster, so mirroring it doesn't mean anything), and the reconcile/watch plumbing assumes a namespace for the source object.
+`projection` mirrors only **namespaced** resources (`ConfigMap`, `Secret`, `Service`, `Deployment`, most CRs, etc.). A Projection or ClusterProjection that points at a cluster-scoped Kind (`Namespace`, `ClusterRole`, `ClusterRoleBinding`, `StorageClass`, `CustomResourceDefinition`, `PriorityClass`, …) fails fast with `SourceResolved=False` and the message `<group>/<version>/<Kind> is cluster-scoped; projection only mirrors namespaced resources`. There's no use case that motivated cluster-scoped support so far (there can only be one `Namespace` with a given name in a cluster, so mirroring it doesn't mean anything), and the reconcile/watch plumbing assumes a namespace for the source object.
 
 ### Default source-mode silently ignores un-annotated sources
 
-`projection` ships with `--source-mode=allowlist` as the default (since v0.2). A source that does not carry `projection.sh/projectable: "true"` is silently treated as not projectable — the `Projection` reports `SourceResolved=False reason=SourceNotProjectable`, and no destination is written. This is the safer default in multi-tenant clusters (source owners must opt their objects in), but it's a UX cliff for first-time users who copy a Projection example without reading the source-side requirement.
+`projection` ships with `--source-mode=allowlist` as the default (since v0.2). A source that does not carry `projection.sh/projectable: "true"` is silently treated as not projectable — the Projection (or ClusterProjection) reports `SourceResolved=False reason=SourceNotProjectable`, and no destination is written. This is the safer default in multi-tenant clusters (source owners must opt their objects in), but it's a UX cliff for first-time users who copy an example without reading the source-side requirement.
 
 If you're mirroring sources you don't control (third-party CRs, controller-managed Secrets) and can't add the annotation, flip the operator to `--source-mode=permissive` (Helm value `sourceMode: permissive`) — every source then becomes projectable unless explicitly vetoed with `projectable: "false"`. The trade-off is documented in [Concepts §7](concepts.md#7-source-projectability-policy).
 
-### Bare `*` is not a valid `apiVersion`
-
-The unpinned `<group>/*` form is supported (e.g. `apps/*`, `example.com/*`), but bare `*` is rejected at reconcile time with `SourceResolutionFailed`. The core API group has stable versions, so an unpinned form there has no meaning; the reconciler enforces this even though the CRD pattern regex is permissive (kept simple). See [Concepts § 1](concepts.md#1-source) for the full apiVersion-form table.
-
 ### Events live on `events.k8s.io/v1`, not `core/v1`
 
-Since v0.2, the controller emits Kubernetes Events through `events.k8s.io/v1`. Tooling that reads the legacy `core/v1` Event resource — including the bare `kubectl get events` command — won't surface them. Read with `kubectl get events.events.k8s.io --field-selector regarding.name=<projection>,regarding.kind=Projection` instead. [Observability](observability.md#2-kubernetes-events) and [Troubleshooting](troubleshooting.md#how-to-read-events) cover the query shape.
+Since v0.2, the controller emits Kubernetes Events through `events.k8s.io/v1`. Tooling that reads the legacy `core/v1` Event resource — including the bare `kubectl get events` command — won't surface them. Read with `kubectl get events.events.k8s.io --field-selector regarding.name=<projection>,regarding.kind=Projection` instead (substitute `regarding.kind=ClusterProjection` for cluster-scoped CRs). [Observability](observability.md#2-kubernetes-events) and [Troubleshooting](troubleshooting.md#how-to-read-events) cover the query shape.
 
 ### RBAC narrowing is install-time, not per-source
 
@@ -59,7 +73,7 @@ The chart's `supportedKinds` value lets cluster admins narrow the controller's `
 
 ### Pre-1.0 API surface
 
-The CRD is `projection.sh/v1` and that group/version is the storage version, but the project as a whole is pre-1.0. Breaking changes to fields and behavior are allowed in minor releases until v1.0.0 ships; the [API stability page](api-stability.md) documents what v1.0.0 will commit to. Breaking changes are announced in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) and in release notes with migration guidance.
+The CRDs are `projection.sh/v1` and that group/version is the storage version, but the project as a whole is pre-1.0. Breaking changes to fields and behavior are allowed in minor releases until v1.0.0 ships; the [API stability page](api-stability.md) documents what v1.0.0 will commit to. Breaking changes are announced in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) and in release notes with migration guidance.
 
 ## Roadmap
 
