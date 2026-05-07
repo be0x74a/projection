@@ -140,18 +140,19 @@ type LatencyResult struct {
 	P50, P95, P99 time.Duration
 }
 
-// SelectorLatencyResult captures the fan-out latency distribution for a
-// selector profile, split into two paired distributions per stamp:
+// FanoutLatencyResult captures the fan-out latency distribution for a
+// ClusterProjection (selector or list), split into two paired distributions
+// per stamp:
 //
 //   - Earliest: time from source stamp to the moment the *first* destination
-//     in the selector set is observed carrying the new stamp.
+//     in the fan-out set is observed carrying the new stamp.
 //   - Slowest:  time from source stamp to the moment the *last*  destination
-//     in the selector set is observed carrying the new stamp (i.e. all N
+//     in the fan-out set is observed carrying the new stamp (i.e. all N
 //     destinations have caught up).
 //
-// The spread between Earliest and Slowest is the honest SLI for selector
-// fan-out: users see the tail, not the median.
-type SelectorLatencyResult struct {
+// The spread between Earliest and Slowest is the honest SLI for fan-out:
+// users see the tail, not the median.
+type FanoutLatencyResult struct {
 	Samples  int
 	Earliest LatencyResult
 	Slowest  LatencyResult
@@ -170,15 +171,21 @@ func quantiles(durations []time.Duration) (p50, p95, p99 time.Duration) {
 	return q(0.50), q(0.95), q(0.99)
 }
 
-// stampSource patches a unix-nano timestamp annotation on one source object.
-// Returns the stamp string and the time the patch was issued.
-func stampSource(ctx context.Context, c *clients, ref projectionRef) (string, time.Time, error) {
+// stampSourceAt patches a unix-nano timestamp annotation on one source
+// object (gvkIdx, ns, name). Returns the stamp string and the time the
+// patch was issued.
+func stampSourceAt(ctx context.Context, c *clients, gvkIdx int, srcNs, srcName string) (string, time.Time, error) {
 	t0 := time.Now()
 	stamp := fmt.Sprintf("%d", t0.UnixNano())
 	patchBody := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, benchAnnotationStamp, stamp)
-	_, err := c.dynamic.Resource(gvr(ref.GVKIdx)).Namespace(ref.SrcNs).
-		Patch(ctx, ref.SrcName, k8stypes.MergePatchType, []byte(patchBody), metav1.PatchOptions{})
+	_, err := c.dynamic.Resource(gvr(gvkIdx)).Namespace(srcNs).
+		Patch(ctx, srcName, k8stypes.MergePatchType, []byte(patchBody), metav1.PatchOptions{})
 	return stamp, t0, err
+}
+
+// stampSource is the projectionRef-friendly wrapper around stampSourceAt.
+func stampSource(ctx context.Context, c *clients, ref projectionRef) (string, time.Time, error) {
+	return stampSourceAt(ctx, c, ref.GVKIdx, ref.SrcNs, ref.SrcName)
 }
 
 // waitForStamp polls one destination namespace for `stamp` on the annotation.
@@ -203,7 +210,7 @@ func waitForStamp(ctx context.Context, c *clients, gvkIdx int, dstNs, name, stam
 }
 
 // measureE2ESingle stamps each sample source and polls its single destination
-// namespace. Returns one latency distribution. Used for non-selector profiles.
+// namespace. Returns one latency distribution. Used for NP profiles.
 func measureE2ESingle(ctx context.Context, c *clients, sample []projectionRef) (LatencyResult, error) {
 	durations := make([]time.Duration, 0, len(sample))
 	for _, ref := range sample {
@@ -309,27 +316,29 @@ func waitForStampAll(
 	}
 }
 
-// measureE2ESelector stamps the single selector-profile source `stamps`
+// measureE2EClusterFanout stamps the single ClusterProjection source `stamps`
 // times and, for each stamp, records the earliest and slowest per-stamp
-// propagation across the full matched-destination set via waitForStampAll.
-// Two paired distributions expose the fan-out spread users actually see.
-func measureE2ESelector(
+// propagation across the full destination set via waitForStampAll. Two paired
+// distributions expose the fan-out spread users actually see. Caller passes
+// the destination set explicitly, so this function works for both
+// CP-selector and CP-list shapes.
+func measureE2EClusterFanout(
 	ctx context.Context,
 	c *clients,
-	src projectionRef,
+	src clusterProjectionRef,
 	allDstNs []string,
 	stamps int,
-) (SelectorLatencyResult, error) {
+) (FanoutLatencyResult, error) {
 	earliestDur := make([]time.Duration, 0, stamps)
 	slowestDur := make([]time.Duration, 0, stamps)
 	for i := 0; i < stamps; i++ {
-		stamp, t0, err := stampSource(ctx, c, src)
+		stamp, t0, err := stampSourceAt(ctx, c, src.GVKIdx, src.SrcNs, src.SrcName)
 		if err != nil {
-			return SelectorLatencyResult{}, fmt.Errorf("patching source %s/%s: %w", src.SrcNs, src.SrcName, err)
+			return FanoutLatencyResult{}, fmt.Errorf("patching source %s/%s: %w", src.SrcNs, src.SrcName, err)
 		}
 		earliest, slowest, err := waitForStampAll(ctx, c, src.GVKIdx, allDstNs, src.SrcName, stamp, t0)
 		if err != nil {
-			return SelectorLatencyResult{}, err
+			return FanoutLatencyResult{}, err
 		}
 		earliestDur = append(earliestDur, earliest)
 		slowestDur = append(slowestDur, slowest)
@@ -338,7 +347,7 @@ func measureE2ESelector(
 	sort.Slice(slowestDur, func(i, j int) bool { return slowestDur[i] < slowestDur[j] })
 	e50, e95, e99 := quantiles(earliestDur)
 	s50, s95, s99 := quantiles(slowestDur)
-	return SelectorLatencyResult{
+	return FanoutLatencyResult{
 		Samples:  stamps,
 		Earliest: LatencyResult{Samples: stamps, P50: e50, P95: e95, P99: e99},
 		Slowest:  LatencyResult{Samples: stamps, P50: s50, P95: s95, P99: s99},

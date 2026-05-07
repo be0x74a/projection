@@ -23,6 +23,10 @@ type Environment struct {
 	OSArch         string `json:"os_arch,omitempty"`
 }
 
+// Measurements is the per-profile result. Up to three e2e distributions
+// coexist for mixed profiles: NP single-target latency, CP-selector fan-out
+// (earliest/slowest), and CP-list fan-out (earliest/slowest). Zero fields
+// indicate the corresponding shape was not exercised.
 type Measurements struct {
 	WatchedGVKs        float64 `json:"watched_gvks"`
 	ControllerHeapMB   float64 `json:"controller_heap_mb"`
@@ -32,25 +36,29 @@ type Measurements struct {
 	ReconcileP95Ms     float64 `json:"reconcile_p95_ms"`
 	ReconcileP99Ms     float64 `json:"reconcile_p99_ms"`
 
-	// Non-selector profiles: one E2E latency distribution across sampled
-	// Projections. Zero for selector profiles.
-	E2ESamples int           `json:"e2e_samples,omitempty"`
-	E2EP50     time.Duration `json:"e2e_p50_ns,omitempty"`
-	E2EP95     time.Duration `json:"e2e_p95_ns,omitempty"`
-	E2EP99     time.Duration `json:"e2e_p99_ns,omitempty"`
+	// NP latency (single-target). Zero when no NP shape.
+	E2ENPSamples int           `json:"e2e_np_samples,omitempty"`
+	E2ENPP50     time.Duration `json:"e2e_np_p50_ns,omitempty"`
+	E2ENPP95     time.Duration `json:"e2e_np_p95_ns,omitempty"`
+	E2ENPP99     time.Duration `json:"e2e_np_p99_ns,omitempty"`
 
-	// Selector profiles only: two paired distributions per stamp, captured
-	// by a List-driven poll over the full matched-destination set. Earliest
-	// is the time to the first destination catching the new stamp; Slowest
-	// is the time to the last destination catching it. The spread exposes
-	// fan-out cost. Zero for non-selector profiles.
-	E2EFanoutSamples int           `json:"e2e_fanout_samples,omitempty"`
-	E2EEarliestP50   time.Duration `json:"e2e_earliest_p50_ns,omitempty"`
-	E2EEarliestP95   time.Duration `json:"e2e_earliest_p95_ns,omitempty"`
-	E2EEarliestP99   time.Duration `json:"e2e_earliest_p99_ns,omitempty"`
-	E2ESlowestP50    time.Duration `json:"e2e_slowest_p50_ns,omitempty"`
-	E2ESlowestP95    time.Duration `json:"e2e_slowest_p95_ns,omitempty"`
-	E2ESlowestP99    time.Duration `json:"e2e_slowest_p99_ns,omitempty"`
+	// CP-selector fan-out (earliest + slowest). Zero when no CP-selector shape.
+	E2ECPSelSamples     int           `json:"e2e_cp_sel_samples,omitempty"`
+	E2ECPSelEarliestP50 time.Duration `json:"e2e_cp_sel_earliest_p50_ns,omitempty"`
+	E2ECPSelEarliestP95 time.Duration `json:"e2e_cp_sel_earliest_p95_ns,omitempty"`
+	E2ECPSelEarliestP99 time.Duration `json:"e2e_cp_sel_earliest_p99_ns,omitempty"`
+	E2ECPSelSlowestP50  time.Duration `json:"e2e_cp_sel_slowest_p50_ns,omitempty"`
+	E2ECPSelSlowestP95  time.Duration `json:"e2e_cp_sel_slowest_p95_ns,omitempty"`
+	E2ECPSelSlowestP99  time.Duration `json:"e2e_cp_sel_slowest_p99_ns,omitempty"`
+
+	// CP-list fan-out (earliest + slowest). Zero when no CP-list shape.
+	E2ECPListSamples     int           `json:"e2e_cp_list_samples,omitempty"`
+	E2ECPListEarliestP50 time.Duration `json:"e2e_cp_list_earliest_p50_ns,omitempty"`
+	E2ECPListEarliestP95 time.Duration `json:"e2e_cp_list_earliest_p95_ns,omitempty"`
+	E2ECPListEarliestP99 time.Duration `json:"e2e_cp_list_earliest_p99_ns,omitempty"`
+	E2ECPListSlowestP50  time.Duration `json:"e2e_cp_list_slowest_p50_ns,omitempty"`
+	E2ECPListSlowestP95  time.Duration `json:"e2e_cp_list_slowest_p95_ns,omitempty"`
+	E2ECPListSlowestP99  time.Duration `json:"e2e_cp_list_slowest_p99_ns,omitempty"`
 }
 
 func (r *Report) WriteJSON(w io.Writer) error {
@@ -68,12 +76,11 @@ func (r *Report) WriteText(w io.Writer) error {
 		_, _ = fmt.Fprintf(tw, format, args...)
 	}
 	row("profile\t%s\n", r.Profile.Name)
-	row("projections\t%d\n", r.Profile.Projections)
+	row("namespaced_projections\t%d\n", r.Profile.NamespacedProjections)
+	row("selector_namespaces\t%d\n", r.Profile.SelectorNamespaces)
+	row("list_namespaces\t%d\n", r.Profile.ListNamespaces)
 	row("gvks\t%d\n", r.Profile.GVKs)
 	row("namespaces\t%d\n", r.Profile.Namespaces)
-	if r.Profile.SelectorNamespaces > 0 {
-		row("selector_ns\t%d\n", r.Profile.SelectorNamespaces)
-	}
 	row("watched_gvks\t%.0f\n", r.Measurements.WatchedGVKs)
 	row("controller_heap_mb\t%.1f\n", r.Measurements.ControllerHeapMB)
 	row("controller_rss_mb\t%.1f\n", r.Measurements.ControllerRSSMB)
@@ -81,17 +88,26 @@ func (r *Report) WriteText(w io.Writer) error {
 	row("reconcile_p50_ms\t%.2f\n", r.Measurements.ReconcileP50Ms)
 	row("reconcile_p95_ms\t%.2f\n", r.Measurements.ReconcileP95Ms)
 	row("reconcile_p99_ms\t%.2f\n", r.Measurements.ReconcileP99Ms)
+	if r.Profile.NamespacedProjections > 0 {
+		row("e2e_np_p50\t%s\n", r.Measurements.E2ENPP50)
+		row("e2e_np_p95\t%s\n", r.Measurements.E2ENPP95)
+		row("e2e_np_p99\t%s\n", r.Measurements.E2ENPP99)
+	}
 	if r.Profile.SelectorNamespaces > 0 {
-		row("e2e_earliest_p50\t%s\n", r.Measurements.E2EEarliestP50)
-		row("e2e_earliest_p95\t%s\n", r.Measurements.E2EEarliestP95)
-		row("e2e_earliest_p99\t%s\n", r.Measurements.E2EEarliestP99)
-		row("e2e_slowest_p50\t%s\n", r.Measurements.E2ESlowestP50)
-		row("e2e_slowest_p95\t%s\n", r.Measurements.E2ESlowestP95)
-		row("e2e_slowest_p99\t%s\n", r.Measurements.E2ESlowestP99)
-	} else {
-		row("e2e_p50\t%s\n", r.Measurements.E2EP50)
-		row("e2e_p95\t%s\n", r.Measurements.E2EP95)
-		row("e2e_p99\t%s\n", r.Measurements.E2EP99)
+		row("e2e_cp_sel_earliest_p50\t%s\n", r.Measurements.E2ECPSelEarliestP50)
+		row("e2e_cp_sel_earliest_p95\t%s\n", r.Measurements.E2ECPSelEarliestP95)
+		row("e2e_cp_sel_earliest_p99\t%s\n", r.Measurements.E2ECPSelEarliestP99)
+		row("e2e_cp_sel_slowest_p50\t%s\n", r.Measurements.E2ECPSelSlowestP50)
+		row("e2e_cp_sel_slowest_p95\t%s\n", r.Measurements.E2ECPSelSlowestP95)
+		row("e2e_cp_sel_slowest_p99\t%s\n", r.Measurements.E2ECPSelSlowestP99)
+	}
+	if r.Profile.ListNamespaces > 0 {
+		row("e2e_cp_list_earliest_p50\t%s\n", r.Measurements.E2ECPListEarliestP50)
+		row("e2e_cp_list_earliest_p95\t%s\n", r.Measurements.E2ECPListEarliestP95)
+		row("e2e_cp_list_earliest_p99\t%s\n", r.Measurements.E2ECPListEarliestP99)
+		row("e2e_cp_list_slowest_p50\t%s\n", r.Measurements.E2ECPListSlowestP50)
+		row("e2e_cp_list_slowest_p95\t%s\n", r.Measurements.E2ECPListSlowestP95)
+		row("e2e_cp_list_slowest_p99\t%s\n", r.Measurements.E2ECPListSlowestP99)
 	}
 	row("duration_seconds\t%.1f\n", r.DurationSeconds)
 	return tw.Flush()
