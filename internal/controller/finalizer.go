@@ -29,6 +29,12 @@ import (
 // so the controller can run cleanup before the apiserver garbage-collects it.
 const finalizerName = "projection.sh/finalizer"
 
+// clusterFinalizerName is the cluster-tier sibling of finalizerName. Distinct
+// from the namespaced finalizer so cleanup paths can't collide — a controller
+// that mistakenly applies the namespaced finalizer to a ClusterProjection (or
+// vice versa) will fail to be cleaned up by the right reconciler.
+const clusterFinalizerName = "projection.sh/cluster-finalizer"
+
 // handleDeletion runs the deletion path for a Projection whose
 // DeletionTimestamp has been set. Returns handled=true when the caller should
 // short-circuit Reconcile. A non-nil err is propagated so controller-runtime
@@ -61,4 +67,35 @@ func (d *ControllerDeps) ensureFinalizer(ctx context.Context, proj *projectionv1
 	}
 	controllerutil.AddFinalizer(proj, finalizerName)
 	return d.Update(ctx, proj)
+}
+
+// handleClusterDeletion is the cluster-tier sibling of handleDeletion. Runs
+// the deletion path for a ClusterProjection: enumerates and deletes every
+// owned destination across all namespaces, then strips the cluster
+// finalizer. Returns handled=true when the caller should short-circuit
+// Reconcile.
+func (d *ControllerDeps) handleClusterDeletion(ctx context.Context, cp *projectionv1.ClusterProjection) (handled bool, err error) {
+	if cp.DeletionTimestamp.IsZero() {
+		return false, nil
+	}
+	if controllerutil.ContainsFinalizer(cp, clusterFinalizerName) {
+		if err := d.deleteClusterDestination(ctx, cp); err != nil {
+			log.FromContext(ctx).Error(err, "deleting cluster destinations")
+			return true, err
+		}
+		controllerutil.RemoveFinalizer(cp, clusterFinalizerName)
+		if err := d.Update(ctx, cp); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+// ensureClusterFinalizer is the cluster-tier sibling of ensureFinalizer.
+func (d *ControllerDeps) ensureClusterFinalizer(ctx context.Context, cp *projectionv1.ClusterProjection) error {
+	if controllerutil.ContainsFinalizer(cp, clusterFinalizerName) {
+		return nil
+	}
+	controllerutil.AddFinalizer(cp, clusterFinalizerName)
+	return d.Update(ctx, cp)
 }

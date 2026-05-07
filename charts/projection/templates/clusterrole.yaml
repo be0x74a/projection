@@ -31,6 +31,7 @@ rules:
   - apiGroups:
       - projection.sh
     resources:
+      - clusterprojections
       - projections
     verbs:
       - create
@@ -43,14 +44,30 @@ rules:
   - apiGroups:
       - projection.sh
     resources:
+      - clusterprojections/finalizers
       - projections/finalizers
     verbs:
       - update
   - apiGroups:
       - projection.sh
     resources:
+      - clusterprojections/status
       - projections/status
     verbs:
       - get
       - patch
       - update
+  {{- /*
+      Namespace read access is required by the cluster-scoped reconciler
+      to evaluate destination namespaceSelectors and to enqueue affected
+      ClusterProjections on namespace add/update/delete events. The
+      namespaced reconciler doesn't read namespaces.
+  */}}
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch

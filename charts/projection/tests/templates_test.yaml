@@ -148,13 +148,13 @@ tests:
       - equal:
           path: rules[0].verbs
           value: [create, delete, get, list, patch, update, watch]
-      # Projection-own rules are still present (unchanged).
+      # Projection-own rules cover both projections and clusterprojections.
       - equal:
           path: rules[1].apiGroups
           value: [projection.sh]
       - equal:
           path: rules[1].resources
-          value: [projections]
+          value: [clusterprojections, projections]
 
   - it: renders no broad rule when supportedKinds is empty
     template: clusterrole.yaml
@@ -169,11 +169,12 @@ tests:
           value: [projection.sh]
       - equal:
           path: rules[0].resources
-          value: [projections]
-      # Three rules total (3 own-rules, 0 user-config rules).
+          value: [clusterprojections, projections]
+      # Four rules total (3 projection.sh own-rules + 1 namespaces read,
+      # 0 user-config rules).
       - lengthEqual:
           path: rules
-          count: 3
+          count: 4
 
   - it: renders narrow ClusterRole rules from supportedKinds
     template: clusterrole.yaml
@@ -188,7 +189,7 @@ tests:
           of: ClusterRole
       - lengthEqual:
           path: rules
-          count: 5
+          count: 6
       - equal:
           path: rules[0].apiGroups
           value: [""]
@@ -201,7 +202,7 @@ tests:
       - equal:
           path: rules[1].resources
           value: [deployments]
-      # Own-rules remain in position 2, 3, 4.
+      # Own-rules remain after the user-config rules.
       - equal:
           path: rules[2].apiGroups
           value: [projection.sh]
@@ -221,4 +222,18 @@ tests:
           value: ["*"]
       - lengthEqual:
           path: rules
-          count: 4
+          count: 5
+
+  - it: includes namespaces read access in the ClusterRole
+    template: clusterrole.yaml
+    asserts:
+      - isKind:
+          of: ClusterRole
+      # The cluster-scoped reconciler must read namespaces to evaluate
+      # destination namespaceSelectors.
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [namespaces]
+            verbs: [get, list, watch]

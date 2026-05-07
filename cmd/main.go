@@ -199,18 +199,30 @@ func main() {
 			"verify the apiserver can absorb the parallel write load",
 			"value", cfg.selectorWriteConcurrency)
 	}
+	// Both reconcilers share the same apiserver-facing dependencies. We
+	// build a single ControllerDeps and embed it into both — this matches
+	// the layout described in deps.go.
+	deps := &controller.ControllerDeps{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		DynamicClient: dynamicClient,
+		RESTMapper:    mgr.GetRESTMapper(),
+	}
 	if err = (&controller.ProjectionReconciler{
-		ControllerDeps: &controller.ControllerDeps{
-			Client:        mgr.GetClient(),
-			Scheme:        mgr.GetScheme(),
-			DynamicClient: dynamicClient,
-			RESTMapper:    mgr.GetRESTMapper(),
-		},
+		ControllerDeps:  deps,
+		SourceMode:      sourceMode,
+		RequeueInterval: cfg.requeueInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Projection")
+		os.Exit(1)
+	}
+	if err = (&controller.ClusterProjectionReconciler{
+		ControllerDeps:           deps,
 		SourceMode:               sourceMode,
 		RequeueInterval:          cfg.requeueInterval,
 		SelectorWriteConcurrency: cfg.selectorWriteConcurrency,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Projection")
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterProjection")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

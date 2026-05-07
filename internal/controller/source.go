@@ -142,11 +142,10 @@ func (r *ProjectionReconciler) handleSourceFetchError(ctx context.Context, proj 
 			proj.Spec.Source.Namespace, proj.Spec.Source.Name))
 }
 
-// checkSourceProjectable decides whether a freshly-fetched source object is
-// allowed to be projected, based on the configured SourceMode and the
-// source's projectable annotation. The annotation is evaluated *before* the
-// mode, so a hard "false" veto by the source owner is honored under every
-// mode.
+// checkProjectable decides whether a freshly-fetched source object is
+// allowed to be projected, based on the given SourceMode and the source's
+// projectable annotation. The annotation is evaluated *before* the mode,
+// so a hard "false" veto by the source owner is honored under every mode.
 //
 //   - Annotation = "false" is always a veto, regardless of mode (escape
 //     hatch — short-circuits before the mode check below).
@@ -157,8 +156,9 @@ func (r *ProjectionReconciler) handleSourceFetchError(ctx context.Context, proj 
 // Returns (reason, message, ok). When ok is false, the caller should treat
 // this as a SourceResolved=False condition with the returned reason and
 // message; reason matches the expected scorecard/status vocabulary so
-// external tooling can filter.
-func (r *ProjectionReconciler) checkSourceProjectable(source *unstructured.Unstructured) (reason, message string, ok bool) {
+// external tooling can filter. Free function (not a method) so both
+// reconcilers can call it without indirecting through ControllerDeps.
+func checkProjectable(source *unstructured.Unstructured, mode SourceMode) (reason, message string, ok bool) {
 	val, hasAnnotation := source.GetAnnotations()[projectableAnnotation]
 
 	if hasAnnotation && val == "false" {
@@ -168,7 +168,6 @@ func (r *ProjectionReconciler) checkSourceProjectable(source *unstructured.Unstr
 			false
 	}
 
-	mode := r.SourceMode
 	if mode == "" {
 		mode = SourceModeAllowlist
 	}
@@ -179,4 +178,17 @@ func (r *ProjectionReconciler) checkSourceProjectable(source *unstructured.Unstr
 			false
 	}
 	return "", "", true
+}
+
+// checkSourceProjectable is the namespaced reconciler's wrapper around
+// checkProjectable so existing call-sites and tests don't have to rebuild
+// the SourceMode argument.
+func (r *ProjectionReconciler) checkSourceProjectable(source *unstructured.Unstructured) (reason, message string, ok bool) {
+	return checkProjectable(source, r.SourceMode)
+}
+
+// checkSourceProjectable is the cluster reconciler's wrapper around
+// checkProjectable.
+func (r *ClusterProjectionReconciler) checkSourceProjectable(source *unstructured.Unstructured) (reason, message string, ok bool) {
+	return checkProjectable(source, r.SourceMode)
 }

@@ -791,6 +791,10 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 				RESTMapper:    mapper,
 				Recorder:      events.NewFakeRecorder(256),
 			},
+			// Long RequeueInterval so the dest-watch self-healing test
+			// can prove ensureDestWatch — not periodic resync — is what
+			// recreated the destination.
+			RequeueInterval: 5 * time.Minute,
 		}
 		Expect(sharedR.SetupWithManager(sharedMgr)).To(Succeed())
 
@@ -1006,6 +1010,56 @@ var _ = Describe("Shared source watch (integration with manager)", Ordered, func
 			}, 10*time.Second, 200*time.Millisecond).Should(Equal("1"),
 				"destination %s didn't receive the source update", nameCopy)
 		}
+	})
+
+	It("recreates a destination ConfigMap that was manually deleted (ensureDestWatch self-healing)", func() {
+		// Long RequeueInterval on the shared reconciler is set in BeforeAll
+		// (5 min). The destination is recreated within ~2s here, so the
+		// only path that can be responsible is the dest-side watch.
+		id := nextID()
+		ns := uniqueNS("destwatch")
+		ensureNamespace(ns)
+
+		srcName := "src-cm-" + id
+		dstName := "dst-cm-" + id
+		projKey := types.NamespacedName{Name: "p-destwatch-" + id, Namespace: ns}
+		DeferCleanup(deleteProjection, projKey)
+
+		Expect(k8sClient.Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        srcName,
+				Namespace:   ns,
+				Annotations: map[string]string{projectableAnnotation: "true"},
+			},
+			Data: map[string]string{"k": "v"},
+		})).To(Succeed())
+
+		Expect(k8sClient.Create(ctx, &projectionv1.Projection{
+			ObjectMeta: metav1.ObjectMeta{Name: projKey.Name, Namespace: projKey.Namespace},
+			Spec: projectionv1.ProjectionSpec{
+				Source: projectionv1.SourceRef{
+					Version: "v1", Kind: "ConfigMap",
+					Name: srcName, Namespace: ns,
+				},
+				Destination: projectionv1.ProjectionDestination{Name: dstName},
+			},
+		})).To(Succeed())
+
+		// Wait for the manager-driven reconciler to write the destination.
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{Name: dstName, Namespace: ns}, &corev1.ConfigMap{})
+		}, 10*time.Second, 200*time.Millisecond).Should(Succeed())
+
+		// Manually delete the destination.
+		victim := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: dstName, Namespace: ns}, victim)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, victim)).To(Succeed())
+
+		// ensureDestWatch should fire a reconcile within ~2s.
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{Name: dstName, Namespace: ns}, &corev1.ConfigMap{})
+		}, 4*time.Second, 100*time.Millisecond).Should(Succeed(),
+			"ensureDestWatch should have recreated the destination")
 	})
 
 	It("accepts and reconciles a source whose name contains a dot (Finding C regression)", func() {

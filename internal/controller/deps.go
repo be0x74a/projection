@@ -22,8 +22,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	projectionv1 "github.com/projection-operator/projection/api/v1"
 )
 
 // ControllerDeps bundles dependencies shared by every projection reconciler
@@ -43,14 +41,18 @@ type ControllerDeps struct {
 	Recorder      events.EventRecorder
 }
 
-// emit records a Kubernetes Event against the Projection. Nil-safe so unit
+// emit records a Kubernetes Event against the given object. Nil-safe so unit
 // tests that build a reconciler directly (without SetupWithManager) don't
 // need to plumb a recorder. action is the UpperCamelCase verb describing
 // what the controller did (e.g. Create, Update, Resolve); reason is the
 // categorical outcome tag.
-func (d *ControllerDeps) emit(proj *projectionv1.Projection, eventType, reason, action, message string) {
+//
+// regarding accepts any runtime.Object so both the namespaced Projection and
+// the cluster-scoped ClusterProjection can be the event target without
+// duplicating helpers.
+func (d *ControllerDeps) emit(regarding runtime.Object, eventType, reason, action, message string) {
 	if d == nil || d.Recorder == nil {
 		return
 	}
-	d.Recorder.Eventf(proj, nil, eventType, reason, action, "%s", message)
+	d.Recorder.Eventf(regarding, nil, eventType, reason, action, "%s", message)
 }
