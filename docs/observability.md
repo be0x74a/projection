@@ -203,9 +203,9 @@ Pair this metric with the bench harness output (`test/bench/`) for regression-de
 
 ### `projection_watched_gvks`
 
-`Gauge` (no labels). Tracks the number of distinct **source** GVKs the controller currently has dynamic watches registered for. Incremented when a Projection or ClusterProjection references a previously-unseen source GVK.
+`Gauge` (no labels). Counts **source-watch registrations** across both reconcilers. The two reconcilers (`ProjectionReconciler`, `ClusterProjectionReconciler`) each maintain their own dedup map keyed on the full `GroupVersionKind` (group + version + kind) and increment this gauge once per first-seen GVK. A source GVK referenced from a Projection adds 1; the same GVK referenced from a ClusterProjection adds 1 more. Two CRs pinning different versions of the same Kind also produce two registrations.
 
-In v0.3.0 this gauge is shared across the namespaced and cluster reconcilers — it is the union of source GVKs seen by either, deduplicated. (Source watches in v0.3.0 are keyed on `group/kind/namespace/name` with the version dropped from the watch key; two CRs that pin different versions of the same source share one watch.) Use this for capacity planning at scale: each watch has a memory and apiserver cost, so a steady-state value much higher than the number of distinct source Kinds your CRs actually reference can indicate watch leakage.
+The underlying controller-runtime informer is shared per GVK across the manager, so this gauge approximates handler-chain count, not apiserver List/Watch streams. For apiserver cost the closer signals are `controller_runtime_active_workers`, `workqueue_depth`, and the informer-cache memory metrics from controller-runtime's runtime registry.
 
 ```
 projection_watched_gvks
@@ -213,7 +213,7 @@ projection_watched_gvks
 
 ### `projection_watched_dest_gvks`
 
-`Gauge` (no labels). New in v0.3.0. Tracks the number of distinct **destination** GVKs the controller currently has watches registered for via `ensureDestWatch`.
+`Gauge` (no labels). New in v0.3.0. Same per-(reconciler, GVK) registration accounting as `projection_watched_gvks`, applied to destination watches registered by `ensureDestWatch`.
 
 `ensureDestWatch` (see [Concepts § 7](concepts.md#7-watches)) registers a label-filtered watch on each destination GVK so that a manual `kubectl delete` of a destination triggers an immediate reconcile rather than waiting for the next requeue. The watch source is `PartialObjectMetadata` (cheap deserialization — only `metadata` is decoded) and the filter is keyed on the per-CR-kind UID label, so the watch only fires for objects that already carry an ownership UID label.
 
@@ -221,11 +221,13 @@ projection_watched_gvks
 projection_watched_dest_gvks
 ```
 
+Both gauges are **most useful for leakage detection**: in steady state with no CR creates or deletes, neither should grow. A rising value without corresponding `kubectl apply` activity is a controller bug worth filing. The absolute value is harder to interpret because of the per-reconciler accounting — a deployment with 100 Projections and 1 ClusterProjection over the same set of source Kinds will report a number that depends on how Kinds are split between the two CRDs, not on a single intuitive "what am I watching" count.
+
 Patterns that suggest a problem:
 
-- **Sudden jump** (e.g. `+50`) — likely someone created Projections or ClusterProjections targeting many distinct Kinds at once. Confirm against `kubectl get projections -A -o json` plus `kubectl get clusterprojections -o json` and decide whether that's expected.
-- **Gauge drops to 0 with active CRs** — suggests a watch-handle leak (the watches went away but the controller didn't notice). The controller treats this as a reconcile-bug-class issue; please file a bug.
-- **`projection_watched_dest_gvks` consistently larger than `projection_watched_gvks`** — possible if the same source GVK projects into multiple distinct destination Kinds via overlay (rare), or if cleanup of stale destination watches lags. Worth investigating but not necessarily wrong.
+- **Sudden jump** (e.g. `+50`) without a matching `kubectl apply` — likely a watch-leak class bug. Confirm against `kubectl get projections -A -o json` plus `kubectl get clusterprojections -o json` and file an issue if the new value doesn't track.
+- **Gauge drops to 0 with active CRs** — suggests a watch-handle reset (the controller restarted but didn't re-register). Persists across scrapes? File a bug.
+- **`projection_watched_dest_gvks` consistently larger than `projection_watched_gvks`** — projection is Kind-preserving (source Kind == destination Kind), so in steady state the two should be equal. A persistent gap indicates either a stale dest watch that wasn't pruned (today the Gauge is monotonic, so this is expected after a CR deletion) or a watch-registration bug.
 
 Plus the usual controller-runtime metrics (`controller_runtime_reconcile_total`, `workqueue_depth`, etc.). Both reconcilers register against the shared controller-runtime registry.
 

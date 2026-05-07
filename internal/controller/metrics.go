@@ -55,25 +55,31 @@ var reconcileTotal = prometheus.NewCounterVec(
 	[]string{"kind", "result"},
 )
 
-// watchedGvks mirrors the size of ProjectionReconciler.watched. Incremented
-// on the insert branch of ensureSourceWatch. Intentionally a Gauge (not a
-// Counter) because a future design may prune entries; keeping the type stable
-// means existing dashboards don't have to change if that happens.
+// watchedGvks counts source-watch registrations across both reconcilers.
+// Each reconciler keeps its own dedup map keyed on the full GroupVersionKind,
+// and increments this gauge once per first-seen GVK; a single GVK referenced
+// from both Projection and ClusterProjection therefore contributes two. The
+// underlying controller-runtime informer is shared per GVK, so this gauge
+// approximates handler-chain count, not apiserver List/Watch streams.
+// Intentionally a Gauge (not a Counter) because a future design may prune
+// entries; keeping the type stable means existing dashboards don't have to
+// change if that happens.
 var watchedGvks = prometheus.NewGauge(
 	prometheus.GaugeOpts{
 		Name: "projection_watched_gvks",
-		Help: "Number of distinct source GroupVersionKinds the controller is currently watching.",
+		Help: "Source-watch registrations across reconcilers. One per (reconciler, source GroupVersionKind) pair.",
 	},
 )
 
-// watchedDestGvks counts distinct destination GVKs the controller is
-// watching for self-healing (ensureDestWatch). Same Gauge rationale as
-// watchedGvks — the value rises monotonically today but the type leaves
-// room for pruning later.
+// watchedDestGvks counts destination-watch registrations across both
+// reconcilers via ensureDestWatch. Same per-(reconciler, GVK) accounting
+// as watchedGvks — a destination GVK touched by both reconcilers contributes
+// two. Same Gauge rationale as watchedGvks: the value rises monotonically
+// today but the type leaves room for pruning later.
 var watchedDestGvks = prometheus.NewGauge(
 	prometheus.GaugeOpts{
 		Name: "projection_watched_dest_gvks",
-		Help: "Number of distinct destination GroupVersionKinds the controller is watching for manual-edit / delete healing.",
+		Help: "Destination-watch registrations across reconcilers (ensureDestWatch). One per (reconciler, destination GroupVersionKind) pair.",
 	},
 )
 
