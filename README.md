@@ -134,8 +134,6 @@ kubectl apply -f https://raw.githubusercontent.com/projection-operator/projectio
 kubectl get projections -A
 ```
 
-Upgrading from v0.2? See the [migration walkthrough](docs/upgrade.md).
-
 ## How it works
 
 When you create a `Projection` or `ClusterProjection`, the controller resolves the source GVR via the `RESTMapper`, fetches the source object via the dynamic client, builds a sanitized destination object (overlay applied, ownership annotation stamped, server-owned metadata stripped), and creates or updates the destination — but only if `projection` already owns it. The first reconcile also registers a metadata-only watch on the source's GVK, so future edits to *any* source of that Kind enqueue the relevant CRs via a field-indexed lookup. A label-filtered watch on the destination GVK (`ensureDestWatch`) catches manual deletion or drift and triggers an immediate reconcile. Updates that wouldn't change the destination are skipped to avoid noisy events and metric churn. For `ClusterProjection`, fan-out writes are issued in parallel with a configurable concurrency cap.
@@ -156,12 +154,11 @@ See [docs/concepts.md](docs/concepts.md) for the full picture, [docs/observabili
 - **Cluster-scoped Kinds rejected.** `projection` only mirrors namespaced resources. Pointing at a `Namespace`, `ClusterRole`, or `StorageClass` surfaces `SourceResolved=False reason=SourceResolutionFailed` with a clear message.
 - **`ClusterProjection` fan-out shares one overlay.** All destinations in a `ClusterProjection` get the same overlay; per-destination overlays require multiple namespaced `Projection`s — see [`examples/multiple-destinations-from-one-source.yaml`](examples/multiple-destinations-from-one-source.yaml).
 - **A few Kinds need extra care.** `Service`, `PersistentVolumeClaim`, `Pod`, and `Job` have apiserver-allocated spec fields handled out of the box. Jobs created with `spec.manualSelector: true` are not supported. Other Kinds with similar fields (rare) may need an addition to `droppedSpecFieldsByGVK` — see [limitations](docs/limitations.md#some-kinds-need-extra-stripping-rules).
-- **Pre-1.0.** API stability commitments (which fields will not change, how breaking changes are handled) are documented in [docs/api-stability.md](docs/api-stability.md). v0.3.0 is itself a breaking change with a documented [migration walkthrough](docs/upgrade.md). CRD storage version is `v1`; future versions will be served alongside with conversion.
+- **Pre-1.0.** API stability commitments (which fields will not change, how breaking changes are handled) are documented in [docs/api-stability.md](docs/api-stability.md). v0.3.0 is itself a breaking change. CRD storage version is `v1`; future versions will be served alongside with conversion.
 
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
-- [Upgrading from v0.2 to v0.3](docs/upgrade.md)
 - [Concepts](docs/concepts.md)
 - [API reference](docs/api-reference.md) (auto-generated from `api/v1/*.go`)
 - [CRD behavior and examples](docs/crd-reference.md)

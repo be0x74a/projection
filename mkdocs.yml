@@ -44,7 +44,6 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
-  - Upgrading: upgrade.md
   - Concepts: concepts.md
   - CRD behavior: crd-reference.md
   - API reference: api-reference.md

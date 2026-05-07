@@ -16,7 +16,7 @@ Breaking changes to the API land as `projection.sh/v2`, served alongside v1 via 
 
 We are still pre-v1.0. The API surface is allowed to change with a minor-version bump and a documented migration path; v0.3.0 is itself a worked example of that policy in practice. **After v1.0**, breaking changes require a major-version bump and a formal deprecation cycle (see [Deprecation policy](#deprecation-policy) below).
 
-The list of "what is covered" below describes the post-v1.0 surface — the surface we will commit to. Anything in the [version history](#version-history) under a pre-v1.0 release was free to change at minor-bump time, and several things did, including in v0.3.0. Future minor releases between now and v1.0.0 may carry additional breaking changes; they will be documented in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md) and accompanied by a [migration walkthrough](upgrade.md) when applicable.
+The list of "what is covered" below describes the post-v1.0 surface — the surface we will commit to. Anything in the [version history](#version-history) under a pre-v1.0 release was free to change at minor-bump time, and several things did, including in v0.3.0. Future minor releases between now and v1.0.0 may carry additional breaking changes; they will be documented in the [changelog](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md).
 
 ## What is covered
 
@@ -118,26 +118,15 @@ When v2 is introduced:
 
 ## Version history
 
-This is the standing record of breaking changes between minor pre-v1.0 releases. Migration walkthroughs for releases that need them live in [`upgrade.md`](upgrade.md).
+This is the standing record of breaking changes between minor pre-v1.0 releases.
 
 | Version  | Breaking changes                                                                                                                                                                                                                       |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `v0.3.0` | Single CRD split into `Projection` (namespaced, single-target) and `ClusterProjection` (cluster-scoped, fan-out). `SourceRef.apiVersion` replaced with separate `group` + `version` fields (CEL admission requires `version` when `group` is empty). Ownership annotation renamed from `projection.sh/owned-by` to `projection.sh/owned-by-projection` (namespaced) and `projection.sh/owned-by-cluster-projection` (cluster). New UID labels stamped on every destination (`projection.sh/owned-by-projection-uid` and `projection.sh/owned-by-cluster-projection-uid`). New cluster finalizer (`projection.sh/cluster-finalizer`) on `ClusterProjection`. `projection_reconcile_total` gained a `kind` label; new `projection_watched_dest_gvks` gauge added. No automated migration — see [`upgrade.md`](upgrade.md). |
+| `v0.3.0` | Single CRD split into `Projection` (namespaced, single-target) and `ClusterProjection` (cluster-scoped, fan-out). `SourceRef.apiVersion` replaced with separate `group` + `version` fields (CEL admission requires `version` when `group` is empty). Ownership annotation renamed from `projection.sh/owned-by` to `projection.sh/owned-by-projection` (namespaced) and `projection.sh/owned-by-cluster-projection` (cluster). New UID labels stamped on every destination (`projection.sh/owned-by-projection-uid` and `projection.sh/owned-by-cluster-projection-uid`). New cluster finalizer (`projection.sh/cluster-finalizer`) on `ClusterProjection`. `projection_reconcile_total` gained a `kind` label; new `projection_watched_dest_gvks` gauge added. |
 | `v0.2.0` | Ownership annotation renamed and source-projectability policy introduced (`projection.sh/projectable` annotation, `--source-mode=allowlist|permissive`). Default mode is `allowlist`. Events moved from `core/v1` to `events.k8s.io/v1`.                  |
 | `v0.1.0` | Initial public release. Single CRD `projections.projection.sh/v1` with `destination.namespace` and `destination.namespaceSelector` fields on the same CRD.                                                                              |
 
 The full per-release log lives in the [CHANGELOG](https://github.com/projection-operator/projection/blob/main/CHANGELOG.md). The table above tracks only items that affect API consumers; chart-only changes, internal refactors, and bug fixes are not listed here.
-
-### Ownership-key rename in v0.3.0
-
-The v0.3.0 ownership-annotation rename is worth calling out specifically because it breaks anything that grepped the literal `projection.sh/owned-by` key (without the new `-projection` or `-cluster-projection` suffix). The new keys disambiguate which CRD owns a destination:
-
-- `projection.sh/owned-by-projection` is set by namespaced `Projection`. The value is `<projection-ns>/<projection-name>`.
-- `projection.sh/owned-by-cluster-projection` is set by `ClusterProjection`. The value is `<cluster-projection-name>` (no `<ns>/` prefix).
-
-The new UID labels (`projection.sh/owned-by-projection-uid`, `projection.sh/owned-by-cluster-projection-uid`) are entirely new — they didn't exist in v0.2 and so have no migration path. They're stamped on every fresh write or update; pre-existing v0.2 destinations are missing them until the v0.3 controller updates the destination.
-
-Anything monitoring the literal `projection.sh/owned-by` key needs updating to recognize one or both new keys. See [`upgrade.md` § Ownership-grep caveat](upgrade.md#ownership-grep-caveat) for example queries before-and-after.
 
 ## How we enforce this
 

@@ -106,4 +106,4 @@ Cluster admins bind the `<release>-projection-cluster-admin` ClusterRole explici
 
 ## Next
 
-Install it and create your first `Projection`: [Getting started](getting-started.md). Already on v0.2.x? See [Upgrading](upgrade.md).
+Install it and create your first `Projection`: [Getting started](getting-started.md).
