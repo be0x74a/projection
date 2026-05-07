@@ -36,29 +36,29 @@ func TestResolveGVRRejectsClusterScoped(t *testing.T) {
 	}{
 		{
 			name: "namespaced resource resolves",
-			src:  projectionv1.SourceRef{APIVersion: "v1", Kind: "ConfigMap", Name: "x", Namespace: "ns"},
+			src:  projectionv1.SourceRef{Version: "v1", Kind: "ConfigMap", Name: "x", Namespace: "ns"},
 		},
 		{
 			name:        "Namespace is rejected as cluster-scoped",
-			src:         projectionv1.SourceRef{APIVersion: "v1", Kind: "Namespace", Name: "foo", Namespace: "whatever"},
+			src:         projectionv1.SourceRef{Version: "v1", Kind: "Namespace", Name: "foo", Namespace: "whatever"},
 			wantErr:     true,
 			errContains: "cluster-scoped",
 		},
 		{
 			name:        "ClusterRole is rejected as cluster-scoped",
-			src:         projectionv1.SourceRef{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "admin", Namespace: "whatever"},
+			src:         projectionv1.SourceRef{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole", Name: "admin", Namespace: "whatever"},
 			wantErr:     true,
 			errContains: "cluster-scoped",
 		},
 		{
 			name:        "unknown Kind surfaces the RESTMapper error",
-			src:         projectionv1.SourceRef{APIVersion: "v1", Kind: "FleetOfUnicorns", Name: "x", Namespace: "ns"},
+			src:         projectionv1.SourceRef{Version: "v1", Kind: "FleetOfUnicorns", Name: "x", Namespace: "ns"},
 			wantErr:     true,
 			errContains: "resolving",
 		},
 	}
 
-	r := &ProjectionReconciler{RESTMapper: mapper}
+	r := &ProjectionReconciler{ControllerDeps: &ControllerDeps{RESTMapper: mapper}}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := r.resolveGVR(tc.src)
@@ -87,11 +87,11 @@ func TestResolveGVRPreferredVersion(t *testing.T) {
 	mapper.Add(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, apimeta.RESTScopeNamespace)
 	mapper.Add(schema.GroupVersionKind{Group: "apps", Version: "v1beta2", Kind: "Deployment"}, apimeta.RESTScopeNamespace)
 
-	r := &ProjectionReconciler{RESTMapper: mapper}
+	r := &ProjectionReconciler{ControllerDeps: &ControllerDeps{RESTMapper: mapper}}
 
 	t.Run("pinned form returns the pinned version", func(t *testing.T) {
 		gvr, version, err := r.resolveGVR(projectionv1.SourceRef{
-			APIVersion: "apps/v1beta2", Kind: "Deployment",
+			Group: "apps", Version: "v1beta2", Kind: "Deployment",
 			Name: "x", Namespace: "y",
 		})
 		if err != nil {
@@ -107,7 +107,7 @@ func TestResolveGVRPreferredVersion(t *testing.T) {
 
 	t.Run("unpinned form returns the RESTMapper-preferred version", func(t *testing.T) {
 		gvr, version, err := r.resolveGVR(projectionv1.SourceRef{
-			APIVersion: "apps/*", Kind: "Deployment",
+			Group: "apps", Kind: "Deployment",
 			Name: "x", Namespace: "y",
 		})
 		if err != nil {
@@ -121,74 +121,60 @@ func TestResolveGVRPreferredVersion(t *testing.T) {
 			t.Errorf("version = %q, want v1", version)
 		}
 	})
-
-	t.Run("bare * without group is rejected", func(t *testing.T) {
-		_, _, err := r.resolveGVR(projectionv1.SourceRef{
-			APIVersion: "*", Kind: "Deployment",
-			Name: "x", Namespace: "y",
-		})
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "group is required") {
-			t.Errorf("error %q should contain 'group is required'", err.Error())
-		}
-	})
 }
 
 func TestResolvedVersionMessage(t *testing.T) {
 	cases := []struct {
 		name            string
-		apiVersion      string
+		group           string
+		version         string
 		kind            string
 		resolvedVersion string
 		want            string
 	}{
 		{
 			name:            "unpinned with resolved version",
-			apiVersion:      "apps/*",
+			group:           "apps",
+			version:         "",
 			kind:            "Deployment",
 			resolvedVersion: "v1",
 			want:            "resolved apps/Deployment to preferred version v1",
 		},
 		{
-			name:       "pinned returns empty",
-			apiVersion: "apps/v1",
-			kind:       "Deployment",
+			name:    "pinned returns empty",
+			group:   "apps",
+			version: "v1",
+			kind:    "Deployment",
 			// resolvedVersion unused for pinned forms
 			want: "",
 		},
 		{
-			name:       "core pinned returns empty",
-			apiVersion: "v1",
-			kind:       "ConfigMap",
-			want:       "",
+			name:    "core pinned returns empty",
+			version: "v1",
+			kind:    "ConfigMap",
+			want:    "",
 		},
 		{
 			name:            "unpinned with empty resolvedVersion returns empty",
-			apiVersion:      "apps/*",
+			group:           "apps",
+			version:         "",
 			kind:            "Deployment",
 			resolvedVersion: "",
 			// Guards against failDestination calls that happen before
-			// resolveGVR runs (e.g. InvalidSpec mutex violation).
+			// resolveGVR runs (e.g. a future early-failure path).
 			want: "",
-		},
-		{
-			name:       "malformed apiVersion returns empty",
-			apiVersion: "apps//v1",
-			kind:       "Deployment",
-			want:       "",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := resolvedVersionMessage(projectionv1.SourceRef{
-				APIVersion: tc.apiVersion,
-				Kind:       tc.kind,
+				Group:   tc.group,
+				Version: tc.version,
+				Kind:    tc.kind,
 			}, tc.resolvedVersion)
 			if got != tc.want {
-				t.Errorf("resolvedVersionMessage(%q, %q) = %q, want %q",
-					tc.apiVersion, tc.resolvedVersion, got, tc.want)
+				t.Errorf("resolvedVersionMessage(%q/%q, %q) = %q, want %q",
+					tc.group, tc.version, tc.resolvedVersion, got, tc.want)
 			}
 		})
 	}

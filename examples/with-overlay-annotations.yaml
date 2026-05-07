@@ -1,8 +1,8 @@
 # Apply overlay annotations.
 #
-# Same merge semantics as labels: overlay entries win on key conflict.
-# Useful for tagging the destination with provenance metadata your
-# observability stack can pick up.
+# Same merge semantics as labels: overlay entries win on key conflict
+# (overlay-last). Useful for tagging the destination with provenance
+# metadata your observability stack can pick up.
 #
 # Note: regardless of overlay, projection always stamps:
 #   annotations:
@@ -29,15 +29,14 @@ apiVersion: projection.sh/v1
 kind: Projection
 metadata:
   name: flags-staging
-  namespace: platform
+  namespace: app-staging
 spec:
   source:
-    apiVersion: v1
+    group: ""
+    version: v1
     kind: ConfigMap
     name: feature-flags
     namespace: platform
-  destination:
-    namespace: app-staging
   overlay:
     annotations:
       mirror.example.com/source: platform/feature-flags

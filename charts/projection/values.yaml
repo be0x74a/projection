@@ -31,12 +31,13 @@ replicaCount: 1
 # values speed up developer feedback. Plumbed as --requeue-interval.
 requeueInterval: 30s
 
-# -- Maximum in-flight destination writes per selector-based Projection during
-# fan-out. Each worker issues a Get plus optionally a Create or Update against
-# the apiserver; HTTP/2 multiplexing in client-go shares a single connection
+# -- Maximum in-flight destination writes per selector-based ClusterProjection
+# during fan-out. Has no effect on namespaced Projection (single-target only).
+# Each worker issues a Get plus optionally a Create or Update against the
+# apiserver; HTTP/2 multiplexing in client-go shares a single connection
 # across the workers, so this caps parallelism rather than connections. The
 # default of 16 fits comfortably within typical kube-apiserver APF priority-
-# level budgets at production scale; raise it for Projections matching
+# level budgets at production scale; raise it for ClusterProjections matching
 # thousands of namespaces, lower it on apiserver-constrained clusters. Must
 # be > 0. Plumbed as --selector-write-concurrency.
 selectorWriteConcurrency: 16
@@ -172,6 +173,21 @@ serviceAccount:
   name: ""
   # -- Annotations to add to the ServiceAccount (e.g. IRSA/Workload Identity).
   annotations: {}
+
+# -- End-user-facing RBAC. The controller's own ClusterRole and the
+# `<release>-cluster-admin` ClusterRole are always rendered; this section
+# only controls the aggregated user-tier roles that let namespace tenants
+# self-serve Projection access via the standard admin/edit/view roles.
+rbac:
+  # -- When true (default), ship the `<release>-namespaced-edit` and
+  # `<release>-namespaced-view` ClusterRoles carrying aggregation labels
+  # so the standard admin/edit roles in each namespace gain Projection
+  # CRUD and the standard view role gains read access — automatically,
+  # for every namespace tenant. Set to false to suppress those two
+  # aggregated roles. The `<release>-cluster-admin` ClusterRole (for
+  # ClusterProjection access) is unaffected by this flag and must be
+  # bound explicitly via ClusterRoleBinding regardless.
+  aggregate: true
 
 # -- CRD installation settings. Helm 3 only installs files under crds/ on the
 # FIRST install; subsequent upgrades do NOT reconcile CRDs and `helm uninstall`

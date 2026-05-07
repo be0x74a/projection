@@ -99,15 +99,16 @@ func bindFlags(fs *flag.FlagSet) *runtimeConfig {
 			"churn from lease renewals. Must remain strictly greater than the "+
 			"controller-runtime renew-deadline default (10s).")
 	fs.IntVar(&c.selectorWriteConcurrency, "selector-write-concurrency", 16,
-		"Maximum in-flight destination writes per selector-based Projection "+
+		"Maximum in-flight destination writes per selector-based ClusterProjection "+
 			"during fan-out. Each worker issues a Get plus optionally a "+
 			"Create or Update against the apiserver; HTTP/2 multiplexing in "+
 			"client-go shares a single connection across the workers, so "+
 			"this caps parallelism rather than connections. The default of "+
 			"16 fits comfortably within typical kube-apiserver APF priority-"+
-			"level budgets at production scale; raise it for Projections "+
+			"level budgets at production scale; raise it for ClusterProjections "+
 			"matching thousands of namespaces, lower it on apiserver-"+
-			"constrained clusters. Must be > 0.")
+			"constrained clusters. Has no effect on namespaced Projection "+
+			"(single-target only). Must be > 0.")
 	return c
 }
 
@@ -199,16 +200,30 @@ func main() {
 			"verify the apiserver can absorb the parallel write load",
 			"value", cfg.selectorWriteConcurrency)
 	}
+	// Both reconcilers share the same apiserver-facing dependencies. We
+	// build a single ControllerDeps and embed it into both — this matches
+	// the layout described in deps.go.
+	deps := &controller.ControllerDeps{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		DynamicClient: dynamicClient,
+		RESTMapper:    mgr.GetRESTMapper(),
+	}
 	if err = (&controller.ProjectionReconciler{
-		Client:                   mgr.GetClient(),
-		Scheme:                   mgr.GetScheme(),
-		DynamicClient:            dynamicClient,
-		RESTMapper:               mgr.GetRESTMapper(),
+		ControllerDeps:  deps,
+		SourceMode:      sourceMode,
+		RequeueInterval: cfg.requeueInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Projection")
+		os.Exit(1)
+	}
+	if err = (&controller.ClusterProjectionReconciler{
+		ControllerDeps:           deps,
 		SourceMode:               sourceMode,
 		RequeueInterval:          cfg.requeueInterval,
 		SelectorWriteConcurrency: cfg.selectorWriteConcurrency,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Projection")
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterProjection")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

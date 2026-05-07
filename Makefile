@@ -54,6 +54,7 @@ update-crd-golden: manifests
 .PHONY: sync-chart-crds
 sync-chart-crds: manifests ## Copy generated CRDs into the Helm chart's crds/ directory.
 	cp config/crd/bases/projection.sh_projections.yaml charts/projection/crds/projections.projection.sh.yaml
+	cp config/crd/bases/projection.sh_clusterprojections.yaml charts/projection/crds/clusterprojections.projection.sh.yaml
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.

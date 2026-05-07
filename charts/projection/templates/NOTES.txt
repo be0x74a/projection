@@ -4,9 +4,11 @@ projection {{ .Chart.AppVersion }} has been installed in namespace {{ .Release.N
 
    kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
 
-2. Inspect the Projection CRD schema:
+2. Inspect the Projection CRD schema. Both the namespaced Projection and the
+   cluster-scoped ClusterProjection (shortname: cproj) are installed:
 
    kubectl explain projection
+   kubectl explain clusterprojection
    kubectl explain projection.spec
 
 3. Create your first Projection. A minimal example looks like:
@@ -26,9 +28,25 @@ projection {{ .Chart.AppVersion }} has been installed in namespace {{ .Release.N
        namespace: my-target-namespace
        name: my-mirrored-cm
 
+End-user RBAC (rbac.aggregate=true, the default): the chart ships
+aggregated ClusterRoles so namespace tenants holding the standard
+admin or edit roles automatically gain Projection CRUD on their own
+namespace, and view holders gain read-only access. No extra
+RoleBindings are required for namespace-scoped Projection use.
+
+ClusterProjection access is gated separately. The chart renders a
+ClusterRole named {{ include "projection.fullname" . }}-cluster-admin
+that grants full ClusterProjection CRUD, but it carries NO aggregation
+labels — a cluster admin must bind it explicitly:
+
+   kubectl create clusterrolebinding my-cproj-admins \
+     --clusterrole={{ include "projection.fullname" . }}-cluster-admin \
+     --user=alice@example.com
+
 See the chart README and https://github.com/projection-operator/projection for more examples.
 
 NOTE: CRDs were installed on first install only. Helm does not upgrade or
-delete CRDs. To remove the CRD manually:
+delete CRDs. To remove the CRDs manually:
 
    kubectl delete crd projections.projection.sh
+   kubectl delete crd clusterprojections.projection.sh

@@ -16,6 +16,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	projectionv1 "github.com/projection-operator/projection/api/v1"
@@ -27,36 +28,37 @@ import (
 // tests; the fuzzer then varies each primitive to find edge cases.
 func FuzzBuildDestination(f *testing.F) {
 	// Seed corpus — shape matches the f.Fuzz signature below.
-	f.Add("src-cm", "src-ns", "ConfigMap", "v1",
+	f.Add("src-cm", "src-ns", "ConfigMap", "", "v1",
 		"rv-123", "uid-abc", "app", "demo",
-		"proj-name", "proj-ns", "dst-name", "dst-ns",
+		"proj-name", "proj-ns", "dst-name",
 		"overlay-key", "overlay-val")
-	f.Add("x", "x", "Service", "v1",
+	f.Add("x", "x", "Service", "", "v1",
 		"", "", "", "",
-		"p", "p", "", "",
+		"p", "p", "",
 		"", "")
-	f.Add("svc", "team-a", "Service", "v1",
+	f.Add("svc", "team-a", "Service", "", "v1",
 		"1", "u", "tier", "front",
-		"mirror", "team-a", "svc-dst", "team-b",
+		"mirror", "team-a", "svc-dst",
 		"mirrored", "true")
 
 	f.Fuzz(func(t *testing.T,
-		srcName, srcNS, kind, apiVersion string,
+		srcName, srcNS, kind, group, version string,
 		rvSrc, uidSrc, labelKey, labelValue string,
-		projName, projNS, dstName, dstNS string,
+		projName, projNS, dstName string,
 		overlayKey, overlayValue string) {
 
 		// Skip clearly invalid inputs that the reconciler itself would reject
 		// at admission or GVR-resolve time. Fuzzing those cases doesn't teach
 		// us anything about buildDestination's own logic.
-		if srcName == "" || srcNS == "" || kind == "" || apiVersion == "" ||
+		if srcName == "" || srcNS == "" || kind == "" || version == "" ||
 			projName == "" || projNS == "" {
 			t.Skip()
 		}
 
 		src := &unstructured.Unstructured{}
-		src.SetAPIVersion(apiVersion)
-		src.SetKind(kind)
+		src.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: group, Version: version, Kind: kind,
+		})
 		src.SetName(srcName)
 		src.SetNamespace(srcNS)
 		if rvSrc != "" {
@@ -79,10 +81,10 @@ func FuzzBuildDestination(f *testing.F) {
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: projNS},
 			Spec: projectionv1.ProjectionSpec{
 				Source: projectionv1.SourceRef{
-					APIVersion: apiVersion, Kind: kind,
+					Group: group, Version: version, Kind: kind,
 					Name: srcName, Namespace: srcNS,
 				},
-				Destination: projectionv1.DestinationRef{Namespace: dstNS, Name: dstName},
+				Destination: projectionv1.ProjectionDestination{Name: dstName},
 			},
 		}
 		if overlayKey != "" {
@@ -154,10 +156,11 @@ func FuzzBuildDestination(f *testing.F) {
 			t.Error("non-stripped source annotation was lost")
 		}
 
-		// APIVersion + Kind carry over verbatim.
-		if dst.GetAPIVersion() != apiVersion || dst.GetKind() != kind {
-			t.Errorf("apiVersion/kind drift: got %s/%s, want %s/%s",
-				dst.GetAPIVersion(), dst.GetKind(), apiVersion, kind)
+		// Group/Version/Kind carry over verbatim from the source.
+		gotGVK := dst.GroupVersionKind()
+		if gotGVK.Group != group || gotGVK.Version != version || gotGVK.Kind != kind {
+			t.Errorf("GVK drift: got %s/%s/%s, want %s/%s/%s",
+				gotGVK.Group, gotGVK.Version, gotGVK.Kind, group, version, kind)
 		}
 	})
 }

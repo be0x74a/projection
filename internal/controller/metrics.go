@@ -29,21 +29,36 @@ const (
 	resultDestinationError = "destination_error"
 )
 
-// reconcileTotal counts Projection reconcile outcomes. Registered on
+// Kind label values for reconcileTotal. The strings match the CRD Kind names
+// verbatim because they are externally visible — dashboards and PromQL
+// expressions filter on them.
+const (
+	kindProjection        = "Projection"
+	kindClusterProjection = "ClusterProjection"
+)
+
+// Event label values for e2eSeconds. v0.3.0 emits "create" only; future minor
+// releases may additively introduce "source-update", "self-heal",
+// "ns-flip-add", "ns-flip-cleanup". Per docs/api-stability.md, additive label
+// values on existing pre-v1.0 metrics are an expected evolution.
+const eventCreate = "create"
+
+// reconcileTotal counts reconcile outcomes partitioned by CR kind
+// (Projection / ClusterProjection) and result bucket. Registered on
 // controller-runtime's global metrics registry so it is exposed automatically
 // on the manager's :8443/metrics endpoint.
 var reconcileTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "projection_reconcile_total",
-		Help: "Total Projection reconciles partitioned by outcome.",
+		Help: "Total reconciles partitioned by CR kind and outcome.",
 	},
-	[]string{"result"},
+	[]string{"kind", "result"},
 )
 
 // watchedGvks mirrors the size of ProjectionReconciler.watched. Incremented
-// on the insert branch of ensureWatch. Intentionally a Gauge (not a Counter)
-// because a future design may prune entries; keeping the type stable means
-// existing dashboards don't have to change if that happens.
+// on the insert branch of ensureSourceWatch. Intentionally a Gauge (not a
+// Counter) because a future design may prune entries; keeping the type stable
+// means existing dashboards don't have to change if that happens.
 var watchedGvks = prometheus.NewGauge(
 	prometheus.GaugeOpts{
 		Name: "projection_watched_gvks",
@@ -51,6 +66,37 @@ var watchedGvks = prometheus.NewGauge(
 	},
 )
 
+// watchedDestGvks counts distinct destination GVKs the controller is
+// watching for self-healing (ensureDestWatch). Same Gauge rationale as
+// watchedGvks — the value rises monotonically today but the type leaves
+// room for pruning later.
+var watchedDestGvks = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "projection_watched_dest_gvks",
+		Help: "Number of distinct destination GroupVersionKinds the controller is watching for manual-edit / delete healing.",
+	},
+)
+
+// e2eSeconds is the wall-clock latency from a Projection or
+// ClusterProjection's metadata.creationTimestamp to the first successful
+// destination Create. Companion to the bench harness in test/bench/, which
+// measures the same observation externally — exposing it as a controller
+// metric lets production dashboards read what the bench reports.
+//
+// The `event` label is reserved for additive values in future releases (e.g.
+// "source-update", "self-heal", "ns-flip-add", "ns-flip-cleanup"); v0.3.0
+// emits "create" only. Buckets are locked at v1.0 and span 5ms..30s — sized
+// for the typical create-path floor of a few-tens-of-ms through the slow
+// end of multi-second apiserver-throttled reconciles.
+var e2eSeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "projection_e2e_seconds",
+		Help:    "End-to-end latency from CR creationTimestamp to first successful destination Create.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+	},
+	[]string{"kind", "event"},
+)
+
 func init() {
-	metrics.Registry.MustRegister(reconcileTotal, watchedGvks)
+	metrics.Registry.MustRegister(reconcileTotal, watchedGvks, watchedDestGvks, e2eSeconds)
 }

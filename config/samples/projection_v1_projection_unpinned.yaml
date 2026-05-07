@@ -5,12 +5,10 @@ metadata:
     app.kubernetes.io/name: projection
     app.kubernetes.io/managed-by: kustomize
   name: deployment-mirror-unpinned
-  namespace: default
+  namespace: dest-ns
 spec:
   source:
-    apiVersion: apps/*
+    group: apps
     kind: Deployment
     name: my-deployment
     namespace: source-ns
-  destination:
-    namespace: dest-ns

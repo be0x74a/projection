@@ -2,8 +2,8 @@ apiVersion: v2
 name: projection
 description: The Kubernetes CRD for declarative resource mirroring across namespaces.
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+version: 0.3.0
+appVersion: "0.3.0"
 kubeVersion: ">=1.32.0-0"
 home: https://docs.projection.sh
 sources:
@@ -46,35 +46,40 @@ annotations:
       version: v1
       name: projections.projection.sh
       displayName: Projection
-      description: Mirrors a single Kubernetes object from one namespace into one or more destination namespaces, with an optional label/annotation overlay.
+      description: Namespaced single-target mirror of one Kubernetes object into the Projection's own namespace, with an optional name override and label/annotation overlay.
+    - kind: ClusterProjection
+      version: v1
+      name: clusterprojections.projection.sh
+      displayName: ClusterProjection
+      description: Cluster-scoped fan-out mirror of one Kubernetes object into many destination namespaces, selected by an explicit list or a label selector.
   artifacthub.io/crdsExamples: |
     - apiVersion: projection.sh/v1
       kind: Projection
       metadata:
-        name: shared-ca-bundle
+        name: app-config-to-tenant-a
+        namespace: tenant-a
       spec:
         source:
-          apiVersion: v1
+          group: ""
+          version: v1
           kind: ConfigMap
-          namespace: platform
-          name: ca-bundle
-        destination:
-          namespace: app
-          name: ca-bundle
+          namespace: default
+          name: app-config
     - apiVersion: projection.sh/v1
-      kind: Projection
+      kind: ClusterProjection
       metadata:
-        name: shared-ca-bundle-fanout
+        name: app-config-fanout
       spec:
         source:
-          apiVersion: v1
+          group: ""
+          version: v1
           kind: ConfigMap
-          namespace: platform
-          name: ca-bundle
+          namespace: default
+          name: app-config
         destination:
           namespaceSelector:
             matchLabels:
-              projection.sh/receive-ca-bundle: "true"
+              projection.sh/mirror: "true"
         overlay:
           labels:
-            app.kubernetes.io/managed-by: projection
+            projected-by: projection

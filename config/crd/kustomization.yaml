@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/projection.sh_projections.yaml
+- bases/projection.sh_clusterprojections.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

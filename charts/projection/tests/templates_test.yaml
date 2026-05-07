@@ -5,6 +5,9 @@ templates:
   - poddisruptionbudget.yaml
   - deployment.yaml
   - clusterrole.yaml
+  - clusterrole-namespaced-edit.yaml
+  - clusterrole-namespaced-view.yaml
+  - clusterrole-cluster-admin.yaml
 
 tests:
   - it: renders no ServiceMonitor by default
@@ -148,13 +151,13 @@ tests:
       - equal:
           path: rules[0].verbs
           value: [create, delete, get, list, patch, update, watch]
-      # Projection-own rules are still present (unchanged).
+      # Projection-own rules cover both projections and clusterprojections.
       - equal:
           path: rules[1].apiGroups
           value: [projection.sh]
       - equal:
           path: rules[1].resources
-          value: [projections]
+          value: [clusterprojections, projections]
 
   - it: renders no broad rule when supportedKinds is empty
     template: clusterrole.yaml
@@ -169,11 +172,12 @@ tests:
           value: [projection.sh]
       - equal:
           path: rules[0].resources
-          value: [projections]
-      # Three rules total (3 own-rules, 0 user-config rules).
+          value: [clusterprojections, projections]
+      # Four rules total (3 projection.sh own-rules + 1 namespaces read,
+      # 0 user-config rules).
       - lengthEqual:
           path: rules
-          count: 3
+          count: 4
 
   - it: renders narrow ClusterRole rules from supportedKinds
     template: clusterrole.yaml
@@ -188,7 +192,7 @@ tests:
           of: ClusterRole
       - lengthEqual:
           path: rules
-          count: 5
+          count: 6
       - equal:
           path: rules[0].apiGroups
           value: [""]
@@ -201,7 +205,7 @@ tests:
       - equal:
           path: rules[1].resources
           value: [deployments]
-      # Own-rules remain in position 2, 3, 4.
+      # Own-rules remain after the user-config rules.
       - equal:
           path: rules[2].apiGroups
           value: [projection.sh]
@@ -221,4 +225,202 @@ tests:
           value: ["*"]
       - lengthEqual:
           path: rules
-          count: 4
+          count: 5
+
+  - it: includes namespaces read access in the ClusterRole
+    template: clusterrole.yaml
+    asserts:
+      - isKind:
+          of: ClusterRole
+      # The cluster-scoped reconciler must read namespaces to evaluate
+      # destination namespaceSelectors.
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [namespaces]
+            verbs: [get, list, watch]
+
+  # --- Aggregated end-user ClusterRoles -----------------------------------
+  # rbac.aggregate=true (the default) ships three ClusterRoles so namespace
+  # tenants automatically inherit Projection CRUD via the standard
+  # admin/edit/view aggregation, while ClusterProjection access stays
+  # explicitly cluster-tier gated.
+
+  - it: renders the namespaced-edit ClusterRole with both admin and edit aggregation labels
+    template: clusterrole-namespaced-edit.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ClusterRole
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-projection-namespaced-edit
+      - equal:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-admin"]
+          value: "true"
+      - equal:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-edit"]
+          value: "true"
+      # Edit-tier role must NOT carry the view label (view is a strict
+      # subset of edit, so adding it would be redundant but we still want
+      # to guard against accidental over-aggregation).
+      - notExists:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-view"]
+      - equal:
+          path: rules[0].apiGroups
+          value: [projection.sh]
+      - equal:
+          path: rules[0].resources
+          value: [projections]
+      - equal:
+          path: rules[0].verbs
+          value: [get, list, watch, create, update, patch, delete, deletecollection]
+      - equal:
+          path: rules[1].apiGroups
+          value: [projection.sh]
+      - equal:
+          path: rules[1].resources
+          value: [projections/status]
+      - equal:
+          path: rules[1].verbs
+          value: [get]
+      # Edit MUST NOT include clusterprojections — that's the whole point
+      # of splitting namespaced-edit and cluster-admin.
+      - notContains:
+          path: rules
+          any: true
+          content:
+            resources: [clusterprojections]
+
+  - it: renders the namespaced-view ClusterRole with only the view aggregation label
+    template: clusterrole-namespaced-view.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ClusterRole
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-projection-namespaced-view
+      - equal:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-view"]
+          value: "true"
+      # Negative assertions: view must NOT aggregate into admin or edit.
+      - notExists:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-admin"]
+      - notExists:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-edit"]
+      # Read-only verbs only — no create/update/patch/delete.
+      - equal:
+          path: rules[0].apiGroups
+          value: [projection.sh]
+      - equal:
+          path: rules[0].resources
+          value: [projections, projections/status]
+      - equal:
+          path: rules[0].verbs
+          value: [get, list, watch]
+      - notContains:
+          path: rules[0].verbs
+          content: create
+      - notContains:
+          path: rules[0].verbs
+          content: update
+      - notContains:
+          path: rules[0].verbs
+          content: patch
+      - notContains:
+          path: rules[0].verbs
+          content: delete
+
+  - it: renders the cluster-admin ClusterRole with NO aggregation labels
+    template: clusterrole-cluster-admin.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ClusterRole
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-projection-cluster-admin
+      # Critical negative assertions: this role MUST NOT aggregate to any
+      # default role. ClusterProjection is cluster-tier and adding any
+      # aggregate-to-* label would silently widen edit/admin/view holders
+      # into the cluster scope.
+      - notExists:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-admin"]
+      - notExists:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-edit"]
+      - notExists:
+          path: metadata.labels["rbac.authorization.k8s.io/aggregate-to-view"]
+      - equal:
+          path: rules[0].apiGroups
+          value: [projection.sh]
+      - equal:
+          path: rules[0].resources
+          value: [clusterprojections]
+      - equal:
+          path: rules[0].verbs
+          value: [get, list, watch, create, update, patch, delete, deletecollection]
+      - equal:
+          path: rules[1].apiGroups
+          value: [projection.sh]
+      - equal:
+          path: rules[1].resources
+          value: [clusterprojections/status]
+      - equal:
+          path: rules[1].verbs
+          value: [get]
+      # Cluster-admin MUST NOT include the namespaced projections resource.
+      - notContains:
+          path: rules
+          any: true
+          content:
+            resources: [projections]
+
+  - it: suppresses namespaced-edit when rbac.aggregate=false
+    template: clusterrole-namespaced-edit.yaml
+    set:
+      rbac.aggregate: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: suppresses namespaced-view when rbac.aggregate=false
+    template: clusterrole-namespaced-view.yaml
+    set:
+      rbac.aggregate: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: still renders cluster-admin when rbac.aggregate=false
+    # cluster-admin has no aggregation labels, so the rbac.aggregate flag
+    # (which controls aggregation) is orthogonal to its existence. It must
+    # always be present so cluster admins can bind it explicitly via
+    # ClusterRoleBinding regardless of the namespaced-tenant story.
+    template: clusterrole-cluster-admin.yaml
+    set:
+      rbac.aggregate: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-projection-cluster-admin
+
+  # Regression guard: the manager ClusterRole — managed by the controller
+  # team, untouched by this PR — must still grant CRUD on clusterprojections
+  # so the controller can reconcile them. If a future refactor breaks this,
+  # this assertion fails before the controller starts NotFound-looping.
+  - it: keeps clusterprojections CRUD on the manager ClusterRole
+    template: clusterrole.yaml
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [projection.sh]
+            resources: [clusterprojections, projections]
+            verbs: [create, delete, get, list, patch, update, watch]
