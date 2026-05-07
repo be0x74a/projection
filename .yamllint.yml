@@ -1,0 +1,27 @@
+# yamllint configuration for projection. Tuned to match the de facto style
+# already in use across .github/workflows/ and charts/. Keeps the structural
+# rules (indentation, key duplicates, syntax) on while relaxing stylistic
+# rules that don't reflect repo convention.
+extends: default
+
+ignore:
+  # Generated CRDs and chart subtrees with their own conventions.
+  - charts/projection/crds/
+  - config/crd/bases/
+
+rules:
+  document-start: disable
+  truthy:
+    # GitHub Actions workflows use bare `on:` as a top-level key. yamllint's
+    # default flags it as a truthy value; allow it.
+    allowed-values: ['true', 'false']
+    check-keys: false
+  comments:
+    # The repo's SHA-pinned action format is `<sha> # vX.Y.Z` with one space
+    # before `#`. Match that.
+    min-spaces-from-content: 1
+  line-length:
+    # GHA workflow lines, particularly SHA-pinned `uses:` references and bash
+    # one-liners, regularly run past 80 chars in this repo.
+    max: 160
+    level: warning

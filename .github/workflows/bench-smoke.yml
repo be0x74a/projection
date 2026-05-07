@@ -1,0 +1,142 @@
+name: Bench smoke
+
+# Per-PR sanity check: deploy the operator on Kind, run the bench harness with
+# the mixed-typical profile, and post a sticky comment with latency results.
+# Catches schema-break regressions on api/v1 / controller / bench changes
+# before they merge silently. Free-tier 2-vCPU runner only - absolute numbers
+# are noisy; the signal is "did the bench shape break".
+
+on:
+  pull_request:
+    paths:
+      - 'api/v1/**'
+      - 'test/bench/**'
+      - 'internal/controller/**'
+      - 'cmd/main.go'
+
+# Top-level read-only; pull-requests:write granted only to the smoke job for
+# the sticky comment update path.
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Bench smoke (mixed-typical)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: bench-smoke
+          node_image: kindest/node:v1.32.0
+
+      - name: Build image
+        run: make docker-build IMG=projection:smoke
+
+      - name: Load image into Kind
+        run: kind load docker-image projection:smoke --name bench-smoke
+
+      - name: Install CRDs
+        run: make install
+
+      - name: Deploy operator
+        run: make deploy IMG=projection:smoke
+
+      - name: Wait for operator Deployment to be Ready
+        run: |
+          kubectl -n projection-system rollout status deploy/projection-controller-manager --timeout=180s
+
+      - name: Export Kind kubeconfig
+        id: kubeconfig
+        run: |
+          # The bench harness refuses ~/.kube/config for safety. Write to a
+          # dedicated path so the safety gate is satisfied.
+          KUBECONFIG_BENCH="$RUNNER_TEMP/bench-kubeconfig"
+          kind get kubeconfig --name bench-smoke > "$KUBECONFIG_BENCH"
+          echo "path=$KUBECONFIG_BENCH" >> "$GITHUB_OUTPUT"
+
+      - name: Run bench
+        id: bench
+        env:
+          KUBECONFIG_BENCH: ${{ steps.kubeconfig.outputs.path }}
+        run: |
+          go run ./test/bench \
+            --profile=mixed-typical \
+            --kubeconfig="$KUBECONFIG_BENCH" \
+            --output=json \
+            > bench.json
+
+      - name: Build comment body
+        if: always()
+        env:
+          BENCH_OUTCOME: ${{ steps.bench.outcome }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # On bench-step failure, pass an empty path to trigger the failure
+          # branch in the helper. On success, pass the JSON file.
+          short="${HEAD_SHA:0:7}"
+          if [ "$BENCH_OUTCOME" = "success" ]; then
+            .github/scripts/bench-comment.sh bench.json "$short" "$RUN_URL" > comment.md
+          else
+            .github/scripts/bench-comment.sh '' "$short" "$RUN_URL" > comment.md
+          fi
+
+      - name: Post sticky comment
+        if: always()
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Find an existing bench-smoke comment by its hidden marker, then
+          # PATCH it; otherwise create a new one. Avoids a third-party action
+          # (Scorecard requires SHA pin + review for any new dep).
+          #
+          # `select(.body != null)` guards against bot/integration comments
+          # that have produced null bodies in the wild — without it, jq's
+          # startswith() errors and the workflow fails.
+          #
+          # `awk NR==1{print}` reads to EOF rather than closing the pipe early.
+          # `head -1` would SIGPIPE the upstream `gh` once it has its line,
+          # exiting 141 — visible as a step failure under `set -e`.
+          existing=$(gh api "/repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body != null) | select(.body | startswith("<!-- bench-smoke -->")) | .id' \
+            | awk 'NR==1 { print }')
+          # Wrap the post in a graceful warning so fork PRs (where
+          # GITHUB_TOKEN is forced read-only by GitHub regardless of the
+          # workflow's declared write permission) don't show as failed
+          # smoke checks. The bench artifact is still uploaded for review.
+          {
+            if [ -n "$existing" ]; then
+              gh api -X PATCH "/repos/$REPO/issues/comments/$existing" -F body=@comment.md
+            else
+              gh pr comment "$PR" --body-file comment.md
+            fi
+          } || echo "::warning::Comment post failed (fork PR with read-only token, or transient API error). See uploaded bench.json artifact."
+
+      - name: Upload bench artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-smoke-mixed-typical
+          path: bench.json
+          if-no-files-found: ignore
