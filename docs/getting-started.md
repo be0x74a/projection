@@ -102,14 +102,20 @@ metadata:
   namespace: tenant-a            # destination namespace = this
 spec:
   source:
-    group: ""                    # core API
-    version: v1
     kind: ConfigMap
     namespace: default
     name: app-config
   # destination:
   #   name: shared-app-config    # optional rename; defaults to source.name
 ```
+
+> **Why no `apiVersion`, `group`, or `version`?** `spec.source.kind` alone
+> is enough for core-group resources (`ConfigMap`, `Secret`, `Service`,
+> ...). Omitting `version` asks the operator to resolve the preferred
+> served version via the RESTMapper on every reconcile — for core that's
+> always `v1`. For CRDs that go through a `v1beta1 → v1` promotion,
+> omitting `version` lets the source automatically follow the promotion.
+> Set `version` explicitly when you want to pin.
 
 ```bash
 kubectl apply -f tenant-a-projection.yaml
@@ -167,8 +173,6 @@ metadata:
   name: shared-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: default
     name: app-config
@@ -206,8 +210,6 @@ metadata:
   name: shared-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: default
     name: app-config
@@ -235,7 +237,7 @@ Adding the label to a new namespace triggers an immediate reconcile and the dest
 
 ## Sources outside the core group
 
-The examples above use `group: ""` + `version: v1` — the core API. For sources in any **named group** — built-ins like `apps`, `networking.k8s.io`, or your own CRDs at `example.com` — `version` is optional. Two forms work:
+The examples above use bare `kind: ConfigMap` — core-group sources resolved via the RESTMapper. For sources in any **named group** — built-ins like `apps`, `networking.k8s.io`, or your own CRDs at `example.com` — `group` is required and `version` is optional. Two forms work:
 
 ### Pinned named-group source
 
@@ -277,7 +279,7 @@ spec:
 
 The benefit is most visible against **CRD sources**: when a CRD author promotes `v1beta1` → `v1` and stops serving `v1beta1`, the projection picks up the new version automatically on the next reconcile rather than failing with `SourceResolutionFailed` and garbage-collecting the destination.
 
-For the core group (`group: ""`), `version` is required — CEL admission enforces this with the rule `size(self.group) != 0 || size(self.version) != 0`. Setting `group: ""` and leaving `version` empty fails at `kubectl apply` with a CEL violation message.
+The same preferred-version lookup is what powers the bare `kind: ConfigMap` form for core sources — for the core group, the preferred version is always `v1`, so the resolved GVR is stable. Set `version` explicitly when you want to pin to a specific served version.
 
 As with the ConfigMap example above, the source object must carry
 `projection.sh/projectable: "true"` if the controller is running in
