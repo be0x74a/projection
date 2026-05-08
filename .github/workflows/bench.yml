@@ -1,0 +1,188 @@
+name: Bench (release)
+
+# Release-time bench: deploys the operator on a self-hosted Proxmox VM
+# (label `bench-runner`), runs the full 8-profile matrix, and persists the
+# resulting JSON to the `bench-history` orphan branch under
+# `bench-history/<label>.json`. Manual trigger only — `pull_request` is
+# deliberately omitted because self-hosted runners on public repos are
+# attackable from fork-PR code (untrusted commits running on our infra).
+# Operators trigger this from the Actions tab against a release tag, branch,
+# or SHA.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Ref to bench (release tag like v0.4.0, branch, or SHA).'
+        required: true
+      label:
+        description: 'Override bench-history filename (default: derived from ref — vX.Y.Z for tags, sanitized-ref-sha7-ts otherwise).'
+        required: false
+        default: ''
+
+# Top-level read-only; the bench job below adds `contents: write` for the
+# bench-history orphan-branch push (least privilege).
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: Bench full
+    runs-on: [self-hosted, bench-runner]
+    timeout-minutes: 240
+    permissions:
+      contents: write   # bench-history orphan branch push
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
+          path: src
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: src/go.mod
+          cache: true
+          cache-dependency-path: src/go.sum
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: bench-release
+          node_image: kindest/node:v1.32.0
+
+      - name: Build operator image
+        working-directory: src
+        run: make docker-build IMG=projection:bench
+
+      - name: Load image into Kind
+        run: kind load docker-image projection:bench --name bench-release
+
+      - name: Install CRDs
+        working-directory: src
+        run: make install
+
+      - name: Deploy operator
+        working-directory: src
+        run: make deploy IMG=projection:bench
+
+      - name: Wait for operator Deployment to be Ready
+        run: |
+          kubectl -n projection-system rollout status \
+            deploy/projection-controller-manager --timeout=180s
+
+      - name: Export Kind kubeconfig
+        id: kubeconfig
+        run: |
+          # The bench harness refuses ~/.kube/config for safety. Write to a
+          # dedicated path so the safety gate is satisfied.
+          KUBECONFIG_BENCH="$RUNNER_TEMP/bench-kubeconfig"
+          kind get kubeconfig --name bench-release > "$KUBECONFIG_BENCH"
+          echo "path=$KUBECONFIG_BENCH" >> "$GITHUB_OUTPUT"
+
+      - name: Run bench (full matrix)
+        id: bench
+        working-directory: src
+        env:
+          KUBECONFIG_BENCH: ${{ steps.kubeconfig.outputs.path }}
+        run: |
+          # The harness emits one JSON object per profile concatenated to
+          # stdout. Slurp into a single JSON array so downstream consumers
+          # (history files, summary script) can iterate uniformly. Doing this
+          # in the workflow avoids touching the bench harness.
+          go run ./test/bench \
+            --profile=full \
+            --kubeconfig="$KUBECONFIG_BENCH" \
+            --output=json \
+            > /tmp/bench-raw.json
+          jq -s '.' /tmp/bench-raw.json > /tmp/bench.json
+
+      - name: Derive history label
+        id: label
+        env:
+          REF: ${{ inputs.ref }}
+          OVERRIDE: ${{ inputs.label }}
+        run: |
+          # Three cases:
+          #   - explicit label override → use as-is
+          #   - looks like a release tag (v<major>.<minor>.<patch>[...]) → ref
+          #     as-is so v0.4.0 / v1.0.0-rc1 file as themselves
+          #   - branch or SHA → sanitize + sha7 + utc timestamp so two runs
+          #     against the same branch don't clobber each other
+          if [ -n "$OVERRIDE" ]; then
+            label="$OVERRIDE"
+          elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            label="$REF"
+          else
+            sanitized=$(printf '%s' "$REF" | tr '/' '-' | tr -cd '[:alnum:]-')
+            sha7=$(git -C src rev-parse --short=7 HEAD)
+            ts=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+            label="${sanitized}-${sha7}-${ts}"
+          fi
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
+      - name: Render step summary
+        env:
+          LABEL: ${{ steps.label.outputs.label }}
+        run: |
+          src/.github/scripts/bench-history-summary.sh /tmp/bench.json "$LABEL" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push to bench-history orphan branch
+        env:
+          LABEL: ${{ steps.label.outputs.label }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Self-bootstrap: if `bench-history` doesn't exist on origin, init
+          # an orphan branch with a README; otherwise fetch and append. Using
+          # a fresh temp checkout keeps the worktree at `src/` clean and
+          # avoids accidentally touching tracked files on the source branch.
+          set -euo pipefail
+          WORK=$(mktemp -d)
+          cd "$WORK"
+          git init -q
+          git remote add origin "https://github.com/${REPO}.git"
+          gh auth setup-git
+
+          if git ls-remote --exit-code origin bench-history >/dev/null 2>&1; then
+            git fetch -q origin bench-history
+            git checkout -q FETCH_HEAD
+          else
+            git checkout --orphan bench-history
+            git rm -rf . 2>/dev/null || true
+            cat > README.md <<'EOF'
+          # Bench history
+
+          Machine-generated by `.github/workflows/bench.yml`. One JSON file
+          per release run, named by the `label` input (defaults to the
+          release tag). Each file is a JSON array of per-profile bench
+          reports.
+          EOF
+            git add README.md
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                commit -q -m "chore: initialize bench-history"
+          fi
+
+          mkdir -p bench-history
+          cp /tmp/bench.json "bench-history/${LABEL}.json"
+          git add "bench-history/${LABEL}.json"
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "bench: ${LABEL}"
+          git push origin HEAD:bench-history
+
+      - name: Upload bench artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-full-${{ steps.label.outputs.label || 'unlabeled' }}
+          path: /tmp/bench.json
+          if-no-files-found: ignore
+
+      - name: Cleanup Kind cluster
+        if: always()
+        run: kind delete cluster --name bench-release || true
