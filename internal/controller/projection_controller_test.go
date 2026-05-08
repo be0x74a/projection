@@ -406,6 +406,12 @@ var _ = Describe("Projection Controller (integration)", func() {
 			ready := apimeta.FindStatusCondition(got.Status.Conditions, "Ready")
 			Expect(ready).ToNot(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+
+			sr := apimeta.FindStatusCondition(got.Status.Conditions, "SourceResolved")
+			Expect(sr).ToNot(BeNil())
+			Expect(sr.Message).To(Equal("resolved /ConfigMap to preferred version v1"),
+				"unpinned core source must surface the RESTMapper-resolved version "+
+					"so a future defaulter that re-pins to v1 can't silently mask the bare-Kind path")
 		})
 	})
 
