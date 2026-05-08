@@ -24,7 +24,14 @@ The list of "what is covered" below describes the post-v1.0 surface — the surf
 
 Two CRDs at `projection.sh/v1`: `Projection` (namespaced, single-target) and `ClusterProjection` (cluster-scoped, fan-out). The fields of each CRD's `.spec` and `.status` listed in [`crd-reference.md`](crd-reference.md) are permanent. New optional fields may be added; existing fields are not removed or renamed.
 
-The shared `SourceRef` shape (`group`, `version`, `kind`, `namespace`, `name`) is part of both CRDs and equally permanent. The CEL admission rules (`size(self.group) != 0 || size(self.version) != 0` on SourceRef; the `namespaces` ⊕ `namespaceSelector` mutex on `ClusterProjection.destination`) are stable.
+The shared `SourceRef` shape (`group`, `version`, `kind`, `namespace`, `name`) is part of both CRDs and equally permanent. Within that shape:
+
+- `spec.source.group` — optional. Empty means the core group.
+- `spec.source.version` — optional for any group. Empty means the operator resolves the preferred served version via the RESTMapper on every reconcile (for the core group, currently always `v1`). Set explicitly to pin.
+
+These two fields' optionality is a v1.0 commitment: tightening either back to required would be a breaking change and is forbidden post-v1.0. Existing manifests with explicit `version: v1` for any group continue to work unchanged.
+
+The remaining CEL admission rule (`namespaces` ⊕ `namespaceSelector` mutex on `ClusterProjection.destination`) is stable.
 
 ### Annotation and label keys
 
@@ -123,6 +130,7 @@ This is the standing record of breaking changes between minor pre-v1.0 releases.
 
 | Version  | Breaking changes                                                                                                                                                                                                                       |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unreleased | **Rescinded:** the SourceRef `XValidation` rule `size(self.group) != 0 || size(self.version) != 0` (introduced in PR #76 with the message "version is required when group is empty"). `spec.source.version` is now optional for any group, including core. Pure permission grant — manifests with explicit `version: v1` continue to validate. |
 | `v0.3.0` | Single CRD split into `Projection` (namespaced, single-target) and `ClusterProjection` (cluster-scoped, fan-out). `SourceRef.apiVersion` replaced with separate `group` + `version` fields (CEL admission requires `version` when `group` is empty). Ownership annotation renamed from `projection.sh/owned-by` to `projection.sh/owned-by-projection` (namespaced) and `projection.sh/owned-by-cluster-projection` (cluster). New UID labels stamped on every destination (`projection.sh/owned-by-projection-uid` and `projection.sh/owned-by-cluster-projection-uid`). New cluster finalizer (`projection.sh/cluster-finalizer`) on `ClusterProjection`. `projection_reconcile_total` gained a `kind` label; new `projection_watched_dest_gvks` gauge and `projection_e2e_seconds` histogram added. |
 | `v0.2.0` | Ownership annotation renamed and source-projectability policy introduced (`projection.sh/projectable` annotation, `--source-mode=allowlist|permissive`). Default mode is `allowlist`. Events moved from `core/v1` to `events.k8s.io/v1`.                  |
 | `v0.1.0` | Initial public release. Single CRD `projections.projection.sh/v1` with `destination.namespace` and `destination.namespaceSelector` fields on the same CRD.                                                                              |
