@@ -205,10 +205,10 @@ spec:
                   version:
                     description: |-
                       Version is the API version of the source object within its Group. Omit
-                      for non-core groups to use the RESTMapper's preferred served version
-                      (the source automatically follows CRD version promotions). When set,
-                      must match Kubernetes' canonical version-string shape (`vN`,
-                      `vNalphaM`, `vNbetaM`).
+                      to use the RESTMapper's preferred served version (the source
+                      automatically follows version promotions). When set, must match
+                      Kubernetes' canonical version-string shape (`vN`, `vNalphaM`,
+                      `vNbetaM`).
                     pattern: ^$|^v[0-9]+((alpha|beta)[0-9]+)?$
                     type: string
                 required:

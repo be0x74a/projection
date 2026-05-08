@@ -34,10 +34,10 @@ type SourceRef struct {
 	Group string `json:"group,omitempty"`
 
 	// Version is the API version of the source object within its Group. Omit
-	// for non-core groups to use the RESTMapper's preferred served version
-	// (the source automatically follows CRD version promotions). When set,
-	// must match Kubernetes' canonical version-string shape (`vN`,
-	// `vNalphaM`, `vNbetaM`).
+	// to use the RESTMapper's preferred served version (the source
+	// automatically follows version promotions). When set, must match
+	// Kubernetes' canonical version-string shape (`vN`, `vNalphaM`,
+	// `vNbetaM`).
 	// +optional
 	// +kubebuilder:validation:Pattern=`^$|^v[0-9]+((alpha|beta)[0-9]+)?$`
 	Version string `json:"version,omitempty"`
