@@ -43,7 +43,7 @@ Tool binaries (kustomize, controller-gen, setup-envtest, golangci-lint, crd-ref-
 
 **CRDs (`api/v1/`)** — three files:
 
-- `source_types.go` defines the shared `SourceRef{Group, Version, Kind, Namespace, Name}` (DNS-1123 namespace, PascalCase Kind, regex-validated group/version/name). CEL: `size(self.group) != 0 || size(self.version) != 0`.
+- `source_types.go` defines the shared `SourceRef{Group, Version, Kind, Namespace, Name}` (DNS-1123 namespace, PascalCase Kind, regex-validated group/version/name). Both `group` and `version` are optional; empty `version` resolves to the RESTMapper's preferred served version (for the core group, currently `v1`).
 - `projection_types.go` defines `Projection` (scope: Namespaced) with `Spec{Source, Destination ProjectionDestination{Name string}, Overlay}` and `Status{DestinationName string, Conditions []Condition}` (Ready, SourceResolved, DestinationWritten). Printcolumns: Source, Destination, Ready, Age.
 - `clusterprojection_types.go` defines `ClusterProjection` (scope: Cluster) with `Spec{Source, Destination ClusterDestination{Namespaces []string +listType=set +minItems=1, NamespaceSelector LabelSelector}, Overlay}` plus two CEL admission rules on `ClusterProjectionDestination`: `!(has(self.namespaces) && has(self.namespaceSelector))` (mutex) and `has(self.namespaces) || has(self.namespaceSelector)` (at-least-one). `Status{DestinationName string, NamespacesWritten int32, NamespacesFailed int32, Conditions []Condition}`. Printcolumns: Source, Destination, Written, Failed, Ready, Age.
 

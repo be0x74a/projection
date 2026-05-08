@@ -237,7 +237,7 @@ Adding the label to a new namespace triggers an immediate reconcile and the dest
 
 ## Sources outside the core group
 
-The examples above use bare `kind: ConfigMap` — core-group sources resolved via the RESTMapper. For sources in any **named group** — built-ins like `apps`, `networking.k8s.io`, or your own CRDs at `example.com` — `group` is required and `version` is optional. Two forms work:
+The examples above use bare `kind: ConfigMap` — core-group sources resolved via the RESTMapper. For sources in any **named group** — built-ins like `apps`, `networking.k8s.io`, or your own CRDs at `example.com` — set `group` to the named group; `version` remains optional. Two forms work:
 
 ### Pinned named-group source
 

@@ -94,7 +94,7 @@ Cluster admins bind the `<release>-projection-cluster-admin` ClusterRole explici
 ## Features at a glance
 
 - **Two CRDs, one operator** — `Projection` (namespaced, single-target) for tenant self-service; `ClusterProjection` (cluster-scoped, fan-out via list or selector) for cluster-tier mirroring.
-- **Any Kind** — `RESTMapper`-driven GVR resolution. Source `version` may be omitted on non-core groups so the projection follows CRD version promotions automatically.
+- **Any Kind** — `RESTMapper`-driven GVR resolution. Source `version` may be omitted for any group so the projection follows version promotions automatically.
 - **Watch-driven both ways** — dynamic informer registration per source GVK, plus label-filtered watches on destinations so manual deletes self-heal.
 - **Conflict-safe** — `projection.sh/owned-by-projection` (or `…-cluster-projection`) annotations mark our destinations; the controller never overwrites a stranger-owned object.
 - **Clean deletion** — distinct finalizers per tier (`projection.sh/finalizer` and `projection.sh/cluster-finalizer`) clean up every owned destination across every namespace before the CR is removed.

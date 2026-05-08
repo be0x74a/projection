@@ -252,7 +252,7 @@ flowchart TD
 
 Each step in plain prose:
 
-1. **Resolve GVR.** Combine `spec.source.{group, version, kind}` and run it through the `RESTMapper`. If `version` is omitted (non-core groups only), look up the preferred served version. If the cluster doesn't know the Kind, fail with `SourceResolutionFailed`.
+1. **Resolve GVR.** Combine `spec.source.{group, version, kind}` and run it through the `RESTMapper`. If `version` is omitted, look up the preferred served version. If the cluster doesn't know the Kind, fail with `SourceResolutionFailed`.
 2. **Register source watch.** On the first time we see a given GVK, register a metadata-only watch against the cache so future edits to *any* source of that Kind are fanned out to the referencing Projections via a field-indexed lookup.
 3. **Fetch the source** via the dynamic client using the resolved GVR.
 4. **Build the destination object.** Deep-copy the source, strip server-owned metadata (`resourceVersion`, `uid`, `managedFields`, `ownerReferences`, etc.), drop `.status`, remove `kubectl.kubernetes.io/last-applied-configuration`, strip Kind-specific apiserver-allocated spec fields (`Service.spec.{clusterIP, clusterIPs, ipFamilies, ipFamilyPolicy}`, `PersistentVolumeClaim.spec.volumeName`, `Pod.spec.nodeName`, `Job.spec.selector` plus the auto-generated `controller-uid` / `batch.kubernetes.io/controller-uid` / `batch.kubernetes.io/job-name` labels on `spec.template.metadata.labels`), apply the overlay, stamp the ownership annotation and UID label, set destination namespace and name. Jobs created with `spec.manualSelector: true` are a known limitation — the controller's stripping logic assumes the apiserver-managed selector path.
