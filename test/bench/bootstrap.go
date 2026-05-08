@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -142,14 +143,34 @@ func installCRDs(ctx context.Context, c *clients, nGVKs int) error {
 func ptr[T any](v T) *T { return &v }
 
 // ensureNamespace creates a namespace (with optional extra labels) if it
-// doesn't already exist. Idempotent.
+// doesn't already exist, or waits for a previous Terminating namespace to
+// finish deletion before re-creating it. Idempotent.
+//
+// The Terminating wait avoids a race that surfaces when sequential bench
+// profiles reuse the same namespace names: profile N's deferred teardown
+// issues an async ns Delete and returns immediately; profile N+1's
+// bootstrap then calls Get on the same name → succeeds because the ns is
+// still in Terminating phase → skips Create → microseconds later the ns
+// finalizer completes and the namespace drops from etcd → the next CR
+// Create in profile N+1 fails with "namespaces 'bench-src-0' not found".
+// Surfaced on the first end-to-end --profile=full run.
 func ensureNamespace(ctx context.Context, c *clients, name string, extraLabels map[string]string) error {
-	_, err := c.kube.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return err
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		ns, err := c.kube.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			break // gone — safe to create fresh
+		}
+		if err != nil {
+			return err
+		}
+		if ns.Status.Phase != corev1.NamespaceTerminating {
+			return nil // already Active — reuse as-is
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("namespace %s stuck in Terminating phase after 60s", name)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 	labels := map[string]interface{}{"bench": "true"}
 	for k, v := range extraLabels {
@@ -162,7 +183,7 @@ func ensureNamespace(ctx context.Context, c *clients, name string, extraLabels m
 			"labels": labels,
 		},
 	}}
-	_, err = c.dynamic.Resource(nsGVR).Create(ctx, u, metav1.CreateOptions{})
+	_, err := c.dynamic.Resource(nsGVR).Create(ctx, u, metav1.CreateOptions{})
 	return err
 }
 
