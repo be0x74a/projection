@@ -356,3 +356,245 @@ func measureE2EClusterFanout(
 		Slowest:  LatencyResult{Samples: stamps, P50: s50, P95: s95, P99: s99},
 	}, nil
 }
+
+// capSample returns sample[:min(len(sample), n)] without allocating. The
+// caller is responsible for passing a sample they already shuffled or
+// otherwise selected; this helper just enforces the cap.
+func capSample[T any](sample []T, n int) []T {
+	if n <= 0 || len(sample) <= n {
+		return sample
+	}
+	return sample[:n]
+}
+
+// waitForRecreate polls one destination object until it is observed with a
+// UID different from `oldUID`. NotFound is treated as "still recreating" and
+// the loop continues; any other error aborts. Returns the elapsed duration
+// from `t0` when the new UID is observed, or an error on 30s timeout.
+//
+// Self-heal latency end is "destination CR present with new UID", not "spec
+// matches source". The controller's create call is the user-visible event;
+// follow-up reconciles to align spec are measured by source-update.
+func waitForRecreate(
+	ctx context.Context,
+	c *clients,
+	gvkIdx int,
+	dstNs, name string,
+	oldUID k8stypes.UID,
+	t0 time.Time,
+) (time.Duration, error) {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("timeout waiting for recreation of %s/%s", dstNs, name)
+		}
+		dst, err := c.dynamic.Resource(gvr(gvkIdx)).Namespace(dstNs).
+			Get(ctx, name, metav1.GetOptions{})
+		if err == nil && dst.GetUID() != oldUID && dst.GetUID() != "" {
+			return time.Since(t0), nil
+		}
+		if err != nil && !apierrors.IsNotFound(err) {
+			return 0, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitForDeletion polls one destination object until it returns NotFound.
+// Used by ns-flip cleanup: when a namespace's matching label is removed, the
+// destination CR in that namespace should be deleted by the controller.
+// Returns the elapsed duration from `t0`, or an error on 30s timeout.
+func waitForDeletion(
+	ctx context.Context,
+	c *clients,
+	gvkIdx int,
+	dstNs, name string,
+	t0 time.Time,
+) (time.Duration, error) {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("timeout waiting for deletion of %s/%s", dstNs, name)
+		}
+		_, err := c.dynamic.Resource(gvr(gvkIdx)).Namespace(dstNs).
+			Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return time.Since(t0), nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitForCreation polls one destination object until it returns successfully
+// (i.e. the destination CR has been created in `dstNs`). Used by ns-flip add:
+// when a namespace's matching label is re-added, the controller should
+// re-create the destination CR. Returns the elapsed duration from `t0`, or
+// an error on 30s timeout.
+func waitForCreation(
+	ctx context.Context,
+	c *clients,
+	gvkIdx int,
+	dstNs, name string,
+	t0 time.Time,
+) (time.Duration, error) {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("timeout waiting for creation of %s/%s", dstNs, name)
+		}
+		_, err := c.dynamic.Resource(gvr(gvkIdx)).Namespace(dstNs).
+			Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			return time.Since(t0), nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return 0, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// measureSelfHealNP deletes each sample destination CR and times the
+// controller's recreation. Per-destination latency, no fan-out (each NP
+// destination's recreation is independent of the others). Returns one
+// LatencyResult.
+func measureSelfHealNP(ctx context.Context, c *clients, sample []projectionRef) (LatencyResult, error) {
+	durations := make([]time.Duration, 0, len(sample))
+	for _, ref := range sample {
+		// Capture the original UID so we can distinguish "recreated" from
+		// "still being recreated" (NotFound) and from "delete didn't take".
+		orig, err := c.dynamic.Resource(gvr(ref.GVKIdx)).Namespace(ref.DstNs).
+			Get(ctx, ref.SrcName, metav1.GetOptions{})
+		if err != nil {
+			return LatencyResult{}, fmt.Errorf("reading destination %s/%s: %w", ref.DstNs, ref.SrcName, err)
+		}
+		oldUID := orig.GetUID()
+		t0 := time.Now()
+		if err := c.dynamic.Resource(gvr(ref.GVKIdx)).Namespace(ref.DstNs).
+			Delete(ctx, ref.SrcName, metav1.DeleteOptions{}); err != nil {
+			return LatencyResult{}, fmt.Errorf("deleting destination %s/%s: %w", ref.DstNs, ref.SrcName, err)
+		}
+		elapsed, err := waitForRecreate(ctx, c, ref.GVKIdx, ref.DstNs, ref.SrcName, oldUID, t0)
+		if err != nil {
+			return LatencyResult{}, err
+		}
+		durations = append(durations, elapsed)
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	p50, p95, p99 := quantiles(durations)
+	return LatencyResult{Samples: len(durations), P50: p50, P95: p95, P99: p99}, nil
+}
+
+// measureSelfHealClusterFanout deletes K destinations from a CP fan-out set
+// (one at a time, sequentially) and times each recreation. Sample is the
+// pre-selected subset of `dstNs` namespaces — caller chooses K. Each
+// deletion's latency is independent of the others (the controller's recreate
+// path is the user-visible event), so this returns a single LatencyResult,
+// not a fan-out result.
+//
+// Works for both CP-selector and CP-list shapes — both write the same
+// destination object name to a set of namespaces.
+func measureSelfHealClusterFanout(
+	ctx context.Context,
+	c *clients,
+	gvkIdx int,
+	dstName string,
+	sampleDstNs []string,
+) (LatencyResult, error) {
+	durations := make([]time.Duration, 0, len(sampleDstNs))
+	for _, dstNs := range sampleDstNs {
+		orig, err := c.dynamic.Resource(gvr(gvkIdx)).Namespace(dstNs).
+			Get(ctx, dstName, metav1.GetOptions{})
+		if err != nil {
+			return LatencyResult{}, fmt.Errorf("reading destination %s/%s: %w", dstNs, dstName, err)
+		}
+		oldUID := orig.GetUID()
+		t0 := time.Now()
+		if err := c.dynamic.Resource(gvr(gvkIdx)).Namespace(dstNs).
+			Delete(ctx, dstName, metav1.DeleteOptions{}); err != nil {
+			return LatencyResult{}, fmt.Errorf("deleting destination %s/%s: %w", dstNs, dstName, err)
+		}
+		elapsed, err := waitForRecreate(ctx, c, gvkIdx, dstNs, dstName, oldUID, t0)
+		if err != nil {
+			return LatencyResult{}, err
+		}
+		durations = append(durations, elapsed)
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	p50, p95, p99 := quantiles(durations)
+	return LatencyResult{Samples: len(durations), P50: p50, P95: p95, P99: p99}, nil
+}
+
+// patchNamespaceLabel sets a namespace label to `value`, or removes the key
+// entirely when `remove` is true. Idempotent.
+func patchNamespaceLabel(ctx context.Context, c *clients, ns, key, value string, remove bool) error {
+	var patchBody string
+	if remove {
+		// JSON-merge-patch: setting a key to null removes it.
+		patchBody = fmt.Sprintf(`{"metadata":{"labels":{%q:null}}}`, key)
+	} else {
+		patchBody = fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, key, value)
+	}
+	_, err := c.dynamic.Resource(nsGVR).Patch(ctx, ns, k8stypes.MergePatchType,
+		[]byte(patchBody), metav1.PatchOptions{})
+	return err
+}
+
+// measureNSFlip exercises the CP-selector ns-flip event for a sampled subset
+// of destination namespaces. For each namespace in `sampleDstNs`, in
+// sequence:
+//
+//  1. Cleanup phase: remove the matching label, time until the destination
+//     CR in that namespace returns NotFound.
+//  2. Add phase:     re-add the matching label, time until the destination
+//     CR is observed again.
+//
+// Returns two LatencyResults (cleanup, add). One namespace at a time keeps
+// the measurement independent of fan-out scheduling — every flip starts from
+// a "rest of the world is steady" baseline.
+func measureNSFlip(
+	ctx context.Context,
+	c *clients,
+	gvkIdx int,
+	dstName string,
+	sampleDstNs []string,
+	labelKey, labelValue string,
+) (cleanup, add LatencyResult, err error) {
+	cleanupDur := make([]time.Duration, 0, len(sampleDstNs))
+	addDur := make([]time.Duration, 0, len(sampleDstNs))
+	for _, dstNs := range sampleDstNs {
+		// Cleanup phase: drop the label, wait for destination delete.
+		t0 := time.Now()
+		if perr := patchNamespaceLabel(ctx, c, dstNs, labelKey, "", true); perr != nil {
+			return LatencyResult{}, LatencyResult{},
+				fmt.Errorf("removing label from %s: %w", dstNs, perr)
+		}
+		elapsed, werr := waitForDeletion(ctx, c, gvkIdx, dstNs, dstName, t0)
+		if werr != nil {
+			return LatencyResult{}, LatencyResult{}, werr
+		}
+		cleanupDur = append(cleanupDur, elapsed)
+
+		// Add phase: re-add the label, wait for destination create.
+		t1 := time.Now()
+		if perr := patchNamespaceLabel(ctx, c, dstNs, labelKey, labelValue, false); perr != nil {
+			return LatencyResult{}, LatencyResult{},
+				fmt.Errorf("re-adding label to %s: %w", dstNs, perr)
+		}
+		elapsed, werr = waitForCreation(ctx, c, gvkIdx, dstNs, dstName, t1)
+		if werr != nil {
+			return LatencyResult{}, LatencyResult{}, werr
+		}
+		addDur = append(addDur, elapsed)
+	}
+	sort.Slice(cleanupDur, func(i, j int) bool { return cleanupDur[i] < cleanupDur[j] })
+	sort.Slice(addDur, func(i, j int) bool { return addDur[i] < addDur[j] })
+	c50, c95, c99 := quantiles(cleanupDur)
+	a50, a95, a99 := quantiles(addDur)
+	return LatencyResult{Samples: len(cleanupDur), P50: c50, P95: c95, P99: c99},
+		LatencyResult{Samples: len(addDur), P50: a50, P95: a95, P99: a99},
+		nil
+}

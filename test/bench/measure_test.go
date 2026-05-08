@@ -51,3 +51,32 @@ func TestParseMetrics(t *testing.T) {
 		t.Errorf("ReconcileP99: got %v, want in [0.025, 0.05]", m.ReconcileP99)
 	}
 }
+
+func TestCapSample(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []int
+		n    int
+		want []int
+	}{
+		{"empty stays empty", nil, 5, nil},
+		{"under cap returns input", []int{1, 2, 3}, 5, []int{1, 2, 3}},
+		{"at cap returns input", []int{1, 2, 3, 4, 5}, 5, []int{1, 2, 3, 4, 5}},
+		{"over cap truncates from front", []int{1, 2, 3, 4, 5, 6, 7}, 4, []int{1, 2, 3, 4}},
+		{"zero cap returns input unchanged", []int{1, 2, 3}, 0, []int{1, 2, 3}},
+		{"negative cap returns input unchanged", []int{1, 2, 3}, -1, []int{1, 2, 3}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := capSample(tc.in, tc.n)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len mismatch: got %d, want %d", len(got), len(tc.want))
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("element %d: got %d, want %d", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
