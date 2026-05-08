@@ -32,8 +32,6 @@ metadata:
   namespace: app-staging
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: feature-flags
     namespace: platform

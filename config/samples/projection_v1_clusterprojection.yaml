@@ -7,8 +7,6 @@ metadata:
   name: clusterprojection-sample
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: shared-config
     namespace: config-source
