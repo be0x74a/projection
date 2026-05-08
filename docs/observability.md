@@ -105,7 +105,7 @@ For ClusterProjection, partial failures are emitted as **per-namespace events**:
 | `SourceFetchFailed`       | Warning | `Get`      | Dynamic client `Get` on the source returned an error.                             |
 | `SourceResolutionFailed`  | Warning | `Resolve`  | RESTMapper couldn't resolve the source `{group, version, kind}` triple.           |
 | `SourceOptedOut` / `SourceNotProjectable` | Warning | `Validate` | Source is missing the `projection.sh/projectable=true` annotation (allowlist mode) or explicitly sets it to `false`. |
-| `InvalidSpec`             | Warning | `Validate` | Admission rejected the spec — e.g. SourceRef with empty `group` AND empty `version`, or ClusterProjection.destination with both / neither of `namespaces` and `namespaceSelector` set. See [troubleshooting](troubleshooting.md#invalidspec). |
+| `InvalidSpec`             | Warning | `Validate` | Admission rejected the spec — e.g. ClusterProjection.destination with both / neither of `namespaces` and `namespaceSelector` set. See [troubleshooting](troubleshooting.md#invalidspec). |
 
 ### Querying
 

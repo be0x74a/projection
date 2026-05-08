@@ -17,30 +17,20 @@ The `SourceRef` struct is the same for both CRDs:
 
 | Field               | Type   | Required | Notes                                                                              |
 | ------------------- | ------ | -------- | ---------------------------------------------------------------------------------- |
-| `source.group`      | string | yes (may be empty) | `""` for the core API; otherwise a DNS-subdomain group name.            |
-| `source.version`    | string | conditional       | Required when `source.group == ""`. Optional otherwise.                  |
+| `source.group`      | string | no       | `""` (or omitted) for the core API; otherwise a DNS-subdomain group name.          |
+| `source.version`    | string | no       | Optional. Empty resolves to the RESTMapper's preferred served version (for the core group, currently `v1`). Set explicitly to pin. |
 | `source.kind`       | string | yes      | PascalCase. Pattern-validated.                                                     |
 | `source.namespace`  | string | yes      | DNS-1123. Source must be a namespaced object.                                      |
 | `source.name`       | string | yes      | DNS-1123.                                                                          |
 
-### `source` CEL rule
-
-```
-size(self.group) != 0 || size(self.version) != 0
-```
-
-If the group is empty (core API), the version field must be set. Setting `group: ""` and leaving `version` empty fails at `kubectl apply` with a CEL violation.
-
-For non-core groups, omitting `version` triggers preferred-version lookup via the `RESTMapper`. Pinning a specific version (`group: apps`, `version: v1`) locks the projection to that version regardless of CRD promotions in the cluster.
-
 ### `source.version` semantics
 
-| Form                                | Resolution                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------ |
-| `group: ""`, `version: v1`          | Core group, pinned to v1. (Only form for core.)                                |
-| `group: apps`, `version: v1`        | Named group, pinned to v1.                                                     |
-| `group: apps` (`version` omitted)   | Named group, RESTMapper-preferred served version. Follows CRD promotions.      |
-| `group: ""` (`version` omitted)     | Rejected by CEL admission.                                                     |
+| Form                                        | Resolution                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------ |
+| `kind: ConfigMap` (group + version omitted) | Core group, RESTMapper-preferred served version (`v1` today).                  |
+| `group: ""`, `version: v1`                  | Core group, pinned to v1.                                                      |
+| `group: apps`, `version: v1`                | Named group, pinned to v1.                                                     |
+| `group: apps` (`version` omitted)           | Named group, RESTMapper-preferred served version. Follows CRD promotions.      |
 
 The resolved version is surfaced in the `SourceResolved` condition message:
 
@@ -49,7 +39,7 @@ kubectl get projection <name> -o jsonpath='{.status.conditions[?(@.type=="Source
 # → resolved apps/Deployment to preferred version v1
 ```
 
-The unpinned form is the recommended default for sources outside the core group, especially valuable for CRDs: when an author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than reporting `SourceResolutionFailed` and garbage-collecting destinations.
+The unpinned form is the recommended default for sources whose CRD versions evolve over time: when an author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than reporting `SourceResolutionFailed` and garbage-collecting destinations.
 
 ---
 
