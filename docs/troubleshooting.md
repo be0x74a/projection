@@ -175,7 +175,7 @@ The literal admission error from the apiserver looks like this (the message is f
 
 ```
 The ClusterProjection "..." is invalid: spec.destination: Invalid value: "object":
-destination must specify exactly one of namespaces or namespaceSelector, not both
+namespaces and namespaceSelector are mutually exclusive
 ```
 
 **Fix:** decide which destination shape you want and remove the other field.
@@ -206,7 +206,7 @@ The mirror image of the previous error: omitting both fields gives the controlle
 
 ```
 The ClusterProjection "..." is invalid: spec.destination: Invalid value: "object":
-destination must specify exactly one of namespaces or namespaceSelector
+one of namespaces or namespaceSelector must be set
 ```
 
 **Fix:** add one of the two destination shapes, as in the previous example.

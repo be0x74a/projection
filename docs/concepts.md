@@ -69,8 +69,6 @@ metadata:
   namespace: tenant-a       # ← destination namespace = this
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config
@@ -95,8 +93,6 @@ metadata:
   name: shared-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config
@@ -118,8 +114,6 @@ metadata:
   name: shared-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config

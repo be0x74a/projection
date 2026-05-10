@@ -139,5 +139,5 @@ The full per-release log lives in the [CHANGELOG](https://github.com/projection-
 
 ## How we enforce this
 
-- **Schema golden test** (`api/v1/projection_types_golden_test.go`, `api/v1/clusterprojection_types_golden_test.go`) compares the rendered CRDs against committed `api/v1/testdata/*.golden.yaml`. Any change to `api/v1/*.go` that affects either CRD schema fails this test until the golden is consciously regenerated. Regenerate via `make update-crd-golden`.
+- **Schema golden test** (`api/v1/projection_types_golden_test.go` covers both CRDs via a table) compares the rendered CRDs against committed `api/v1/testdata/*.golden.yaml`. Any change to `api/v1/*.go` that affects either CRD schema fails this test until the golden is consciously regenerated. Regenerate via `make update-crd-golden`.
 - **This page is the record.** Anything not listed here is not promised.

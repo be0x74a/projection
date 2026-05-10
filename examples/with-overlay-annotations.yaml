@@ -6,8 +6,10 @@
 #
 # Note: regardless of overlay, projection always stamps:
 #   annotations:
-#     projection.sh/owned-by: <projection-namespace>/<projection-name>
-# This is what the conflict-detection check uses on subsequent reconciles.
+#     projection.sh/owned-by-projection: <projection-namespace>/<projection-name>
+# (ClusterProjection stamps `projection.sh/owned-by-cluster-projection`
+# instead.) This is what the conflict-detection check uses on subsequent
+# reconciles.
 ---
 apiVersion: v1
 kind: Namespace

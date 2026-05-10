@@ -44,8 +44,6 @@ metadata:
   namespace: tenant-a
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config
@@ -78,8 +76,6 @@ metadata:
   name: app-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config

@@ -18,7 +18,7 @@ There are two mature tools that overlap with `projection`: [emberstack/Reflector
 | **Kubernetes Events per outcome**        | `Projected`, `Updated`, `DestinationConflict`, `SourceFetchFailed`, ... (per-namespace for ClusterProjection fan-out) | Limited | Policy-engine events |
 | **Conflict semantics**                   | Refuses to overwrite unowned objects; reports `DestinationConflict` | Overwrites | Configurable via `synchronize`, generally overwrites |
 | **Watch-driven propagation**             | Yes, dynamic per-GVK metadata-only watch on sources; label-filtered watch on destinations | Yes | Yes |
-| **Admission-time source validation**     | Yes (pattern-validated source fields, CEL on `SourceRef` and `ClusterProjection.destination`) | n/a | Yes |
+| **Admission-time source validation**     | Yes (pattern-validated source fields, CEL on `ClusterProjection.destination`) | n/a | Yes |
 | **Prometheus metrics**                   | `projection_reconcile_total{kind,result}`, `projection_watched_gvks`, `projection_watched_dest_gvks` | Partial | Rich policy-engine metrics |
 | **Operational footprint**                | Two CRDs + Deployment                   | One CRD + Deployment                        | Full Kyverno control plane (several controllers)     |
 | **Cluster-wide RBAC surface**            | `*/*` by default; narrowable per-Kind via Helm `supportedKinds` | Namespace-restrictable (scope narrower) | `*/*` (policy engine) |
