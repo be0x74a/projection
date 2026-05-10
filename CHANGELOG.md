@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `spec.source.version` is now optional for the core group. Reference core sources by `kind` alone (e.g. `kind: ConfigMap`); the operator resolves the preferred served version via the RESTMapper. Existing manifests with explicit `version: v1` continue to work unchanged. ([#NN](https://github.com/projection-operator/projection/pull/NN))
+- `spec.source.version` is now optional for the core group. Reference core sources by `kind` alone (e.g. `kind: ConfigMap`); the operator resolves the preferred served version via the RESTMapper. Existing manifests with explicit `version: v1` continue to work unchanged. ([#97](https://github.com/projection-operator/projection/pull/97))
 
 ### Fixed
 
