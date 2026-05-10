@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `spec.source.version` is now optional for the core group. Reference core sources by `kind` alone (e.g. `kind: ConfigMap`); the operator resolves the preferred served version via the RESTMapper. Existing manifests with explicit `version: v1` continue to work unchanged. ([#97](https://github.com/projection-operator/projection/pull/97))
+- Renamed the `Destination` print column to `Destination-Name` on both `Projection` and `ClusterProjection`. Symmetric with `Source-Name`, matches the underlying JSONPath (`.status.destinationName`), and removes the where-vs-what ambiguity on `ClusterProjection` (where `Destination` sat next to the `Targets` namespace count). Scripts that parse `kubectl get projection` table output by column name need to be updated. ([#97](https://github.com/projection-operator/projection/pull/97))
 
 ### Fixed
 
