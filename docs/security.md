@@ -347,7 +347,7 @@ This is the same design point as the [non-aggregation choice](#why-projection-cl
 Release images are pushed to `ghcr.io/projection-operator/projection` and **cosign-signed** with GitHub's OIDC keyless workflow. Verify before pulling:
 
 ```bash
-cosign verify ghcr.io/projection-operator/projection:v0.3.0 \
+cosign verify ghcr.io/projection-operator/projection:v0.3.1 \
   --certificate-identity-regexp "https://github.com/projection-operator/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -355,7 +355,7 @@ cosign verify ghcr.io/projection-operator/projection:v0.3.0 \
 The Helm chart is published to `oci://ghcr.io/projection-operator/charts/projection` and signed with the same workflow:
 
 ```bash
-cosign verify ghcr.io/projection-operator/charts/projection:0.3.0 \
+cosign verify ghcr.io/projection-operator/charts/projection:0.3.1 \
   --certificate-identity-regexp "https://github.com/projection-operator/projection/.github/workflows/.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```

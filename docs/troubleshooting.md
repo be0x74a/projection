@@ -73,7 +73,7 @@ Things that can cause it:
 
 #### Sub-cause: unpinned version with multiple served versions
 
-The v0.3.0 SourceRef permits omitting `source.version` for any group, including core (`kind: ConfigMap` alone is valid; the operator resolves to `v1` via the RESTMapper). The RESTMapper resolves the omitted version through `RESTMapping(GroupKind)`, which returns the *preferred* version. For core resources the preferred version is always `v1`, so the resolved GVR is stable in practice. The pitfall is on **CRDs with multiple served versions**: if the source CRD has more than one served version and either declares no preferred or its preferred isn't the one that holds your data, you'll see `SourceResolutionFailed` (no mapping for the picked version) or, more confusingly, a successful resolve onto the wrong version with subsequent `SourceFetchFailed` because the data lives on a different served version.
+The SourceRef admission permits omitting `source.version` for any group, including core (`kind: ConfigMap` alone is valid; the operator resolves to `v1` via the RESTMapper). The RESTMapper resolves the omitted version through `RESTMapping(GroupKind)`, which returns the *preferred* version. For core resources the preferred version is always `v1`, so the resolved GVR is stable in practice. The pitfall is on **CRDs with multiple served versions**: if the source CRD has more than one served version and either declares no preferred or its preferred isn't the one that holds your data, you'll see `SourceResolutionFailed` (no mapping for the picked version) or, more confusingly, a successful resolve onto the wrong version with subsequent `SourceFetchFailed` because the data lives on a different served version.
 
 Diagnose:
 
@@ -159,7 +159,7 @@ If you see `SourceNotResolved`, the real failure is on the `SourceResolved` cond
 
 The apiserver rejected the spec via CEL validation rules on the CRD. The CR either never created (you'll see this as a `kubectl apply` error) or, in the rare case where CEL validation is bypassed, the controller surfaces it as a runtime `DestinationWritten=False reason=InvalidSpec` event. Either way, the cause is one of two structural mistakes:
 
-> Pre-v0.3 SourceRef carried a CEL rule `size(self.group) != 0 || size(self.version) != 0` that rejected `kubectl apply` for any Projection or ClusterProjection with both `source.group` and `source.version` empty. v0.3 drops that rule — `source.version` is now optional for any group, including core. Manifests with explicit `version: v1` continue to validate; `kind: ConfigMap` alone now works too. Old runbooks mentioning an `InvalidSpec` admission error from `source must specify version when group is empty` apply only to pre-v0.3.
+> Pre-v0.3.1 SourceRef carried a CEL rule `size(self.group) != 0 || size(self.version) != 0` that rejected `kubectl apply` for any Projection or ClusterProjection with both `source.group` and `source.version` empty. v0.3.1 drops that rule — `source.version` is now optional for any group, including core. Manifests with explicit `version: v1` continue to validate; `kind: ConfigMap` alone now works too. Old runbooks mentioning an `InvalidSpec` admission error from `source must specify version when group is empty` apply only to v0.3.0 and earlier.
 
 #### 1. ClusterProjection.destination with both `namespaces` AND `namespaceSelector` set
 
