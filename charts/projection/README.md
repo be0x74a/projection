@@ -65,7 +65,7 @@ Override the image for local / air-gapped deployments:
 helm install projection charts/projection \
   --namespace projection-system --create-namespace \
   --set image.repository=my-registry/projection \
-  --set image.tag=v0.3.0
+  --set image.tag=v0.3.1
 ```
 
 ## Upgrade
