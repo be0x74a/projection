@@ -71,8 +71,6 @@ metadata:
   namespace: tenant-a            # destination namespace = this
 spec:
   source:
-    group: ""                    # core API
-    version: v1
     kind: ConfigMap
     name: app-config
     namespace: platform
@@ -83,8 +81,8 @@ spec:
 
 ```console
 $ kubectl get projections -A
-NAMESPACE   NAME                KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION   READY   AGE
-tenant-a    app-config-mirror   ConfigMap   platform           app-config    app-config    True    2s
+NAMESPACE   NAME                KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION-NAME   READY   AGE
+tenant-a    app-config-mirror   ConfigMap   platform           app-config    app-config         True    2s
 
 $ kubectl get configmap -n tenant-a app-config -o jsonpath='{.metadata.annotations.projection\.sh/owned-by-projection}'
 tenant-a/app-config-mirror
@@ -99,14 +97,14 @@ Need to mirror into many namespaces from one source? Use `ClusterProjection` (cl
 ## Features
 
 - **Two CRDs, two RBAC tiers** — namespaced `Projection` for in-namespace single-target mirrors (destination namespace is structurally the Projection's own), cluster-scoped `ClusterProjection` for fan-out (`destination.namespaces: [a, b, c]` or `destination.namespaceSelector`). Tenants can self-serve `Projection` via the chart's `rbac.aggregate=true` default; `ClusterProjection` requires an explicit cluster-admin binding.
-- **Any Kind** — `RESTMapper`-driven GVR resolution. Works on built-in resources, your CRDs, anything the apiserver knows about. Source uses split `group` + `version` fields; for non-core groups, omitting `version` triggers preferred-version lookup that follows CRD promotions.
+- **Any Kind** — `RESTMapper`-driven GVR resolution. Works on built-in resources, your CRDs, anything the apiserver knows about. Source uses split `group` + `version` fields; omitting `version` triggers preferred-version lookup for any group, so the projection follows version promotions automatically.
 - **Watch-driven** — dynamic informer registration per source GVK on first reference. Edits propagate in ~100ms; no periodic polling. A label-filtered destination-side watch (`ensureDestWatch`) makes manual `kubectl delete` of a destination trigger an immediate reconcile.
 - **Fan-out across namespaces** — one `ClusterProjection` mirrors its source into every namespace listed in `destination.namespaces` or matching a `destination.namespaceSelector`. Destinations are added and removed as namespaces gain or lose the matching label. Bounded fan-out concurrency keeps the apiserver healthy at scale.
 - **Source-owner consent** — default `sourceMode=allowlist` requires sources to carry `projection.sh/projectable="true"`. Source owners can also veto with `="false"` regardless of mode.
 - **Conflict-safe** — `projection.sh/owned-by-projection` (or `projection.sh/owned-by-cluster-projection`) annotation marks our destinations. We refuse to overwrite objects we don't own and report `DestinationConflict` on status. Source deletion (404) automatically cleans up every owned destination.
 - **Clean deletion** — finalizers remove destinations on CR deletion. The cluster CRD's finalizer sweeps every owned destination across the cluster; the namespaced CRD's finalizer cleans up its single in-namespace destination. If ownership has been stripped, we leave the object alone.
 - **Observable** — three status conditions (`SourceResolved`, `DestinationWritten`, `Ready`), `events.k8s.io/v1` Events with `action` verbs (Create/Update/Delete/Get/Validate/Resolve/Write), per-fan-out counters (`status.namespacesWritten`, `status.namespacesFailed`), and Prometheus metrics (`projection_reconcile_total{kind,result}`, `projection_watched_gvks`, `projection_watched_dest_gvks`).
-- **Validated at admission** — `Source` fields are pattern-validated (DNS-1123 names, PascalCase Kinds) so typos fail at `kubectl apply`, not at runtime. CEL enforces `version` required when `group` is empty, and `namespaces` ⊕ `namespaceSelector` mutual exclusion on `ClusterProjection.destination`.
+- **Validated at admission** — `Source` fields are pattern-validated (DNS-1123 names, PascalCase Kinds) so typos fail at `kubectl apply`, not at runtime. CEL enforces `namespaces` ⊕ `namespaceSelector` mutual exclusion (and at-least-one) on `ClusterProjection.destination`.
 - **Smart copy** — strips server-owned metadata, drops `.status`, removes `kubectl.kubernetes.io/last-applied-configuration`, strips Kind-specific apiserver-allocated spec fields (Service `clusterIP`/`clusterIPs`, PVC `volumeName`, Pod `nodeName`, Job `selector`+controller-uid labels), and preserves them on update.
 - **Production-grade Helm chart** — opt-in `ServiceMonitor`, `NetworkPolicy` (egress lockdown), and `PodDisruptionBudget` templates. Three ClusterRoles for tenant self-service vs cluster-tier authority. Operational tuning via `requeueInterval`, `leaderElection.leaseDuration`, and `selectorWriteConcurrency`. RBAC scope narrowable via `supportedKinds`.
 - **Small** — two CRDs, one Deployment, one container. Distroless image, multi-arch (amd64, arm64).

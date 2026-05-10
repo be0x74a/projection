@@ -18,38 +18,40 @@ The source uniquely identifies the Kubernetes object to mirror:
 ```yaml
 spec:
   source:
-    group: ""               # "" for the core API; otherwise a DNS-subdomain group name
-    version: v1             # required when group is empty
     kind: ConfigMap         # required, PascalCase
     namespace: platform     # required, DNS-1123
     name: app-config        # required, DNS-1123
+    # group and version are optional — see SourceRef fields below
 ```
 
-`group` and `version` together identify a `GroupVersionKind`. `kind`, `namespace`, and `name` are required and pattern-validated at admission time — typos fail at `kubectl apply`, not at runtime. The combination is resolved through the apiserver's `RESTMapper`, so anything the cluster knows about works: built-ins, aggregated APIs, CRDs.
+The five SourceRef fields:
+
+- `group` — API group of the source object. Optional; empty means the core group (`ConfigMap`, `Secret`, `Service`, ...).
+- `version` — API version of the source object within its group. Optional; empty means the operator resolves the preferred served version via the RESTMapper on every reconcile. Set explicitly to pin.
+- `kind` — API Kind, PascalCase. Required.
+- `namespace` — Source namespace. Required.
+- `name` — Source object name. Required.
+
+`group`, `version`, and `kind` together identify a `GroupVersionKind`. All five fields are pattern-validated at admission time — typos fail at `kubectl apply`, not at runtime. The combination is resolved through the apiserver's `RESTMapper`, so anything the cluster knows about works: built-ins, aggregated APIs, CRDs.
 
 `projection` only mirrors **namespaced resources**. Pointing the source at a cluster-scoped Kind (`Namespace`, `ClusterRole`, `StorageClass`, `CustomResourceDefinition`, `PriorityClass`, …) is rejected at reconcile time with `SourceResolved=False reason=SourceResolutionFailed` and a message identifying the Kind as cluster-scoped. There can only be one `Namespace` named `foo` in a cluster, so mirroring it has no meaning; the rejection prevents a malformed dynamic-client URL from surfacing as a confusing 404.
 
-### Empty group requires a version
-
-For core API sources (`group: ""`), `version` is required. CEL admission enforces this with the rule `size(self.group) != 0 || size(self.version) != 0`: if the group is empty, the version field must be set. Setting `group: ""` and leaving `version` empty fails at `kubectl apply` with a CEL violation message, not at reconcile time.
-
 ### Pinned vs. preferred version
 
-For non-core groups, `version` is optional. Two forms are supported:
+`version` is optional for any group, including core. Four forms are supported:
 
-| Form                                 | Semantics                                                                          |
-| ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `group: apps`, `version: v1`         | Named group, pinned to v1.                                                         |
-| `group: apps` (version omitted)      | Named group, RESTMapper-preferred served version.                                  |
-| `group: ""`, `version: v1`           | Core group. Pinned (the only form for core).                                       |
+| Form                                        | Semantics                                                                          |
+| ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `kind: ConfigMap` (group + version omitted) | Core group, RESTMapper-preferred served version (`v1` today).                      |
+| `group: ""`, `version: v1`                  | Core group, pinned to v1.                                                          |
+| `group: apps`, `version: v1`                | Named group, pinned to v1.                                                         |
+| `group: apps` (`version` omitted)           | Named group, RESTMapper-preferred served version.                                  |
 
 **Pinned** is an explicit stability anchor: useful when you're mid-migration and want to lock the projection to a specific version while you validate behavior, or when you intentionally need to fall behind a CRD upgrade.
 
-**Preferred** (no `version`) is the default recommendation for sources outside the core group, and especially valuable for CRD sources. It follows the cluster: when a CRD author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than failing with `SourceResolutionFailed` and garbage-collecting your destinations. The same form works for any named group — `apps`, `networking.k8s.io`, `example.com`.
+**Preferred** (no `version`) follows the cluster: when a CRD author promotes `v1beta1` → `v1` and stops serving `v1beta1`, projection picks up the new preferred version on the next reconcile rather than failing with `SourceResolutionFailed` and garbage-collecting your destinations. The same form works for any group — core, `apps`, `networking.k8s.io`, `example.com`. For core sources the preferred version is always `v1`, so the resolved GVR is stable in practice.
 
 The resolved version is reported in the `SourceResolved` condition message (`kubectl describe projection`), so you can always answer "which version is this currently on?" without operator log access.
-
-The core group does not have an unpinned form — its versions are stable, and the CEL rule above forbids leaving both fields empty.
 
 ## 2. Destination
 
@@ -67,8 +69,6 @@ metadata:
   namespace: tenant-a       # ← destination namespace = this
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config
@@ -93,8 +93,6 @@ metadata:
   name: shared-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config
@@ -116,8 +114,6 @@ metadata:
   name: shared-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     namespace: platform
     name: app-config
@@ -250,7 +246,7 @@ flowchart TD
 
 Each step in plain prose:
 
-1. **Resolve GVR.** Combine `spec.source.{group, version, kind}` and run it through the `RESTMapper`. If `version` is omitted (non-core groups only), look up the preferred served version. If the cluster doesn't know the Kind, fail with `SourceResolutionFailed`.
+1. **Resolve GVR.** Combine `spec.source.{group, version, kind}` and run it through the `RESTMapper`. If `version` is omitted, look up the preferred served version. If the cluster doesn't know the Kind, fail with `SourceResolutionFailed`.
 2. **Register source watch.** On the first time we see a given GVK, register a metadata-only watch against the cache so future edits to *any* source of that Kind are fanned out to the referencing Projections via a field-indexed lookup.
 3. **Fetch the source** via the dynamic client using the resolved GVR.
 4. **Build the destination object.** Deep-copy the source, strip server-owned metadata (`resourceVersion`, `uid`, `managedFields`, `ownerReferences`, etc.), drop `.status`, remove `kubectl.kubernetes.io/last-applied-configuration`, strip Kind-specific apiserver-allocated spec fields (`Service.spec.{clusterIP, clusterIPs, ipFamilies, ipFamilyPolicy}`, `PersistentVolumeClaim.spec.volumeName`, `Pod.spec.nodeName`, `Job.spec.selector` plus the auto-generated `controller-uid` / `batch.kubernetes.io/controller-uid` / `batch.kubernetes.io/job-name` labels on `spec.template.metadata.labels`), apply the overlay, stamp the ownership annotation and UID label, set destination namespace and name. Jobs created with `spec.manualSelector: true` are a known limitation — the controller's stripping logic assumes the apiserver-managed selector path.

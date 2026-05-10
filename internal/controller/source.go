@@ -70,8 +70,9 @@ func sourceKey(s projectionv1.SourceRef) string {
 // surface the resolved version in the SourceResolved condition message
 // for operator-visibility.
 //
-// SourceRef admission rejects an empty Version when Group is empty (no
-// unpinned form for the core group), so we don't repeat that check here.
+// Admission permits any combination of (Group, Version), including both
+// empty. When Version is empty we ask the RESTMapper for the preferred
+// served version (v1 for core); when set, we pin to it.
 func (d *ControllerDeps) resolveGVR(src projectionv1.SourceRef) (schema.GroupVersionResource, string, error) {
 	gk := schema.GroupKind{Group: src.Group, Kind: src.Kind}
 

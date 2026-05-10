@@ -361,6 +361,58 @@ var _ = Describe("Projection Controller (integration)", func() {
 			Expect(sr.Status).To(Equal(metav1.ConditionTrue))
 			Expect(sr.Message).To(Equal("resolved apps/Deployment to preferred version v1"))
 		})
+
+		It("admits a Projection with only Kind set on the source (no group, no version)", func() {
+			// Regression test for the relaxed admission rule: dropping the
+			// CEL guard "size(self.group) != 0 || size(self.version) != 0"
+			// means a core-group source can be referenced by Kind alone.
+			// resolveGVR should fall through to the preferred-version path
+			// just like the non-core unpinned form above.
+			bareNS := uniqueNS("bare-kind")
+			ensureNamespace(bareNS)
+
+			src := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "bare-kind-source",
+					Namespace:   bareNS,
+					Annotations: map[string]string{projectableAnnotation: "true"},
+				},
+				Data: map[string]string{"k": "v"},
+			}
+			Expect(k8sClient.Create(ctx, src)).To(Succeed())
+
+			// Same-namespace source/destination would collide on names, so
+			// pick a destination name distinct from the source.
+			bareKey := types.NamespacedName{Name: "bare-kind-projection", Namespace: bareNS}
+			proj := &projectionv1.Projection{
+				ObjectMeta: metav1.ObjectMeta{Name: bareKey.Name, Namespace: bareKey.Namespace},
+				Spec: projectionv1.ProjectionSpec{
+					Source: projectionv1.SourceRef{
+						// Group AND Version both omitted — this is what we're testing.
+						Kind:      "ConfigMap",
+						Namespace: bareNS,
+						Name:      src.Name,
+					},
+					Destination: projectionv1.ProjectionDestination{Name: "bare-kind-dst"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			DeferCleanup(deleteProjection, bareKey)
+
+			reconcileOnce(r, bareKey)
+
+			got := &projectionv1.Projection{}
+			Expect(k8sClient.Get(ctx, bareKey, got)).To(Succeed())
+			ready := apimeta.FindStatusCondition(got.Status.Conditions, "Ready")
+			Expect(ready).ToNot(BeNil())
+			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+
+			sr := apimeta.FindStatusCondition(got.Status.Conditions, "SourceResolved")
+			Expect(sr).ToNot(BeNil())
+			Expect(sr.Message).To(Equal("resolved /ConfigMap to preferred version v1"),
+				"unpinned core source must surface the RESTMapper-resolved version "+
+					"so a future defaulter that re-pins to v1 can't silently mask the bare-Kind path")
+		})
 	})
 
 	Context("Conflict path", func() {

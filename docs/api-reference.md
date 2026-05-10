@@ -248,10 +248,12 @@ SourceRef identifies the object to project.
 
 Group + Version + Kind name the GVK; Namespace + Name name the object.
 
-`version` may be omitted for non-core groups, in which case the operator
-resolves the preferred served version via the RESTMapper on every
-reconcile. The core group has only `v1` as a stable form, so `version`
-MUST be set when `group` is empty — enforced by the CEL rule below.
+Both `group` and `version` may be omitted. Empty `group` means the core
+group (e.g. ConfigMap, Secret, Service). Empty `version` means the
+operator resolves the preferred served version via the RESTMapper on
+every reconcile, so the source automatically follows version promotions
+(e.g. CRD `v1beta1 → v1`; or, hypothetically, core `v1 → v2`). Set
+`version` explicitly to pin.
 
 
 
@@ -262,7 +264,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `group` _string_ | Group is the API group of the source object. Empty string means the<br />core group (e.g. ConfigMap, Secret, Service). |  | Pattern: `^$\|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br />Optional: \{\} <br /> |
-| `version` _string_ | Version is the API version of the source object within its Group. Omit<br />for non-core groups to use the RESTMapper's preferred served version<br />(the source automatically follows CRD version promotions). When set,<br />must match Kubernetes' canonical version-string shape (`vN`,<br />`vNalphaM`, `vNbetaM`). |  | Pattern: `^$\|^v[0-9]+((alpha\|beta)[0-9]+)?$` <br />Optional: \{\} <br /> |
+| `version` _string_ | Version is the API version of the source object within its Group. Omit<br />to use the RESTMapper's preferred served version (the source<br />automatically follows version promotions). When set, must match<br />Kubernetes' canonical version-string shape (`vN`, `vNalphaM`,<br />`vNbetaM`). |  | Pattern: `^$\|^v[0-9]+((alpha\|beta)[0-9]+)?$` <br />Optional: \{\} <br /> |
 | `kind` _string_ | Kind is the API Kind of the source object (PascalCase). |  | Pattern: `^[A-Z][a-zA-Z0-9]*$` <br /> |
 | `namespace` _string_ | Namespace where the source object lives. |  | MaxLength: 63 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br /> |
 | `name` _string_ | Name of the source object (DNS-1123 subdomain). |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` <br /> |

@@ -69,11 +69,11 @@ Things that can cause it:
 - **The Kind is not registered in the cluster.** A CRD you project from is not installed, or was uninstalled. Confirm with `kubectl api-resources | grep <kind>`.
 - **The `group`, `version`, or `kind` is mis-spelled.** The pattern validation on the CRD catches obvious typos at admission, but a Kind that happens to look right syntactically but does not exist slips through.
 - **The target Kind is cluster-scoped.** `projection` only mirrors namespaced resources (`Namespace`, `ClusterRole`, `StorageClass`, CRDs themselves, `PriorityClass`, and similar are all rejected). The message will read `<group>/<version>/<kind> is cluster-scoped; projection only mirrors namespaced resources`.
-- **You omitted `source.version` for a non-core group with multiple served versions and no clear preferred.** When `version:` is omitted, the RESTMapper's preferred-version lookup picks one of the served versions; if your CRD declares more than one served version with no explicit preferred, the pick can be surprising. See the sub-entry below for the remedy.
+- **You omitted `source.version` for a CRD with multiple served versions and no clear preferred.** When `version:` is omitted, the RESTMapper's preferred-version lookup picks one of the served versions; if your CRD declares more than one served version with no explicit preferred, the pick can be surprising. See the sub-entry below for the remedy.
 
 #### Sub-cause: unpinned version with multiple served versions
 
-The v0.3.0 SourceRef permits omitting `source.version` for non-core groups (the empty-group + empty-version combination is rejected by CEL admission — see [InvalidSpec](#invalidspec) below — but `group: example.com` with `version` omitted is fine). The RESTMapper resolves the omitted version through `RESTMapping(GroupKind)`, which returns the *preferred* version. If the source CRD has multiple served versions and either declares no preferred or its preferred isn't the one that holds your data, you'll see `SourceResolutionFailed` (no mapping for the picked version) or, more confusingly, a successful resolve onto the wrong version with subsequent `SourceFetchFailed` because the data lives on a different served version.
+The v0.3.0 SourceRef permits omitting `source.version` for any group, including core (`kind: ConfigMap` alone is valid; the operator resolves to `v1` via the RESTMapper). The RESTMapper resolves the omitted version through `RESTMapping(GroupKind)`, which returns the *preferred* version. For core resources the preferred version is always `v1`, so the resolved GVR is stable in practice. The pitfall is on **CRDs with multiple served versions**: if the source CRD has more than one served version and either declares no preferred or its preferred isn't the one that holds your data, you'll see `SourceResolutionFailed` (no mapping for the picked version) or, more confusingly, a successful resolve onto the wrong version with subsequent `SourceFetchFailed` because the data lives on a different served version.
 
 Diagnose:
 
@@ -87,7 +87,7 @@ kubectl get crd <crd-plural>.<group> \
   -o jsonpath='{range .spec.versions[?(@.storage==true)]}{.name}{"\n"}{end}'
 ```
 
-If the served-version list has more than one entry and none is explicitly preferred, **pin `source.version` explicitly** to the version your data lives on. The version-omission shortcut is intended for stable single-version CRDs and core extension groups where the preferred version is unambiguous; multi-version CRDs should always pin.
+If the served-version list has more than one entry and none is explicitly preferred, **pin `source.version` explicitly** to the version your data lives on. The version-omission shortcut is intended for the core group (where preferred is always `v1`) and for stable single-version CRDs where the preferred version is unambiguous; multi-version CRDs should always pin.
 
 **Fix:** Install the missing CRD; correct the `group`/`version`/`kind` spelling; pin `source.version` explicitly when the source CRD has multiple served versions; or, if the Kind is genuinely cluster-scoped, `projection` is not the right tool for the job.
 
@@ -155,35 +155,13 @@ If you see `SourceNotResolved`, the real failure is on the `SourceResolved` cond
 
 ### InvalidSpec
 
-**Applies to:** `Projection` and `ClusterProjection` (admission-time, so the offending CR usually never makes it past `kubectl apply`).
+**Applies to:** `ClusterProjection` only in v0.3 (admission-time, so the offending CR usually never makes it past `kubectl apply`).
 
-The apiserver rejected the spec via CEL validation rules on the CRD. The CR either never created (you'll see this as a `kubectl apply` error) or, in the rare case where CEL validation is bypassed, the controller surfaces it as a runtime `DestinationWritten=False reason=InvalidSpec` event. Either way, the cause is one of three structural mistakes:
+The apiserver rejected the spec via CEL validation rules on the CRD. The CR either never created (you'll see this as a `kubectl apply` error) or, in the rare case where CEL validation is bypassed, the controller surfaces it as a runtime `DestinationWritten=False reason=InvalidSpec` event. Either way, the cause is one of two structural mistakes:
 
-#### 1. SourceRef with empty `group` AND empty `version`
+> Pre-v0.3 SourceRef carried a CEL rule `size(self.group) != 0 || size(self.version) != 0` that rejected `kubectl apply` for any Projection or ClusterProjection with both `source.group` and `source.version` empty. v0.3 drops that rule — `source.version` is now optional for any group, including core. Manifests with explicit `version: v1` continue to validate; `kind: ConfigMap` alone now works too. Old runbooks mentioning an `InvalidSpec` admission error from `source must specify version when group is empty` apply only to pre-v0.3.
 
-**Applies to:** `Projection` and `ClusterProjection`.
-
-The CEL rule `size(self.group) != 0 || size(self.version) != 0` enforces that when the group is empty (i.e. core API), the version must be specified. Mirroring a core-group object with no explicit version isn't supportable — there's no preferred-version lookup for core (it's always `v1`, but the rule forces you to say so). The literal admission error:
-
-```
-The Projection "..." is invalid: spec.source: Invalid value: "object": source must specify version when group is empty
-```
-
-(Or `spec.source` on `ClusterProjection`.)
-
-**Fix:** add `version: v1` to the source. For core Kinds, `v1` is always correct.
-
-```yaml
-spec:
-  source:
-    group: ""        # core API group
-    version: v1      # required when group is empty
-    kind: ConfigMap
-    namespace: shared
-    name: app-config
-```
-
-#### 2. ClusterProjection.destination with both `namespaces` AND `namespaceSelector` set
+#### 1. ClusterProjection.destination with both `namespaces` AND `namespaceSelector` set
 
 **Applies to:** `ClusterProjection` only.
 
@@ -197,7 +175,7 @@ The literal admission error from the apiserver looks like this (the message is f
 
 ```
 The ClusterProjection "..." is invalid: spec.destination: Invalid value: "object":
-destination must specify exactly one of namespaces or namespaceSelector, not both
+namespaces and namespaceSelector are mutually exclusive
 ```
 
 **Fix:** decide which destination shape you want and remove the other field.
@@ -220,7 +198,7 @@ spec:
         tier: tenant
 ```
 
-#### 3. ClusterProjection.destination with NEITHER `namespaces` NOR `namespaceSelector` set
+#### 2. ClusterProjection.destination with NEITHER `namespaces` NOR `namespaceSelector` set
 
 **Applies to:** `ClusterProjection` only.
 
@@ -228,7 +206,7 @@ The mirror image of the previous error: omitting both fields gives the controlle
 
 ```
 The ClusterProjection "..." is invalid: spec.destination: Invalid value: "object":
-destination must specify exactly one of namespaces or namespaceSelector
+one of namespaces or namespaceSelector must be set
 ```
 
 **Fix:** add one of the two destination shapes, as in the previous example.

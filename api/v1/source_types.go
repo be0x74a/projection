@@ -20,12 +20,12 @@ package v1
 //
 // Group + Version + Kind name the GVK; Namespace + Name name the object.
 //
-// `version` may be omitted for non-core groups, in which case the operator
-// resolves the preferred served version via the RESTMapper on every
-// reconcile. The core group has only `v1` as a stable form, so `version`
-// MUST be set when `group` is empty — enforced by the CEL rule below.
-//
-// +kubebuilder:validation:XValidation:rule="size(self.group) != 0 || size(self.version) != 0",message="version is required when group is empty (no unpinned form for core)"
+// Both `group` and `version` may be omitted. Empty `group` means the core
+// group (e.g. ConfigMap, Secret, Service). Empty `version` means the
+// operator resolves the preferred served version via the RESTMapper on
+// every reconcile, so the source automatically follows version promotions
+// (e.g. CRD `v1beta1 → v1`; or, hypothetically, core `v1 → v2`). Set
+// `version` explicitly to pin.
 type SourceRef struct {
 	// Group is the API group of the source object. Empty string means the
 	// core group (e.g. ConfigMap, Secret, Service).
@@ -34,10 +34,10 @@ type SourceRef struct {
 	Group string `json:"group,omitempty"`
 
 	// Version is the API version of the source object within its Group. Omit
-	// for non-core groups to use the RESTMapper's preferred served version
-	// (the source automatically follows CRD version promotions). When set,
-	// must match Kubernetes' canonical version-string shape (`vN`,
-	// `vNalphaM`, `vNbetaM`).
+	// to use the RESTMapper's preferred served version (the source
+	// automatically follows version promotions). When set, must match
+	// Kubernetes' canonical version-string shape (`vN`, `vNalphaM`,
+	// `vNbetaM`).
 	// +optional
 	// +kubebuilder:validation:Pattern=`^$|^v[0-9]+((alpha|beta)[0-9]+)?$`
 	Version string `json:"version,omitempty"`

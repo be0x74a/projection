@@ -55,8 +55,6 @@ metadata:
   name: app-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: app-config
     namespace: default

@@ -43,8 +43,6 @@ metadata:
   namespace: team-b
 spec:
   source:
-    group: ""
-    version: v1
     kind: Service
     name: api
     namespace: default

@@ -44,8 +44,6 @@ metadata:
   namespace: tenant-a
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: org-policy
     namespace: platform
@@ -59,8 +57,6 @@ metadata:
   namespace: tenant-b
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: org-policy
     namespace: platform
@@ -74,8 +70,6 @@ metadata:
   namespace: tenant-c
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: org-policy
     namespace: platform

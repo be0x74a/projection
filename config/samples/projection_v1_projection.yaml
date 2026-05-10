@@ -7,8 +7,6 @@ metadata:
   name: projection-sample
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: cm-1
     namespace: ns-1

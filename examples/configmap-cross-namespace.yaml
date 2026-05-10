@@ -10,8 +10,9 @@
 #   kubectl get configmap -n tenant-a app-config -o yaml
 #
 # The destination ConfigMap will carry the same .data as the source plus
-# an ownership annotation `projection.sh/owned-by`. Editing the
-# source propagates to the destination in ~100ms.
+# an ownership annotation `projection.sh/owned-by-projection` (the
+# cluster-scoped CRD stamps `projection.sh/owned-by-cluster-projection`
+# instead). Editing the source propagates to the destination in ~100ms.
 ---
 apiVersion: v1
 kind: Namespace
@@ -39,8 +40,6 @@ metadata:
   namespace: tenant-a
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: app-config
     namespace: default

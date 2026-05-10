@@ -32,8 +32,6 @@ metadata:
   name: app-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: app-config
     namespace: platform
@@ -65,8 +63,6 @@ metadata:
   name: app-config-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: app-config
     namespace: platform
@@ -97,8 +93,6 @@ metadata:
   namespace: app-prod              # destination namespace = this
 spec:
   source:
-    group: ""
-    version: v1
     kind: Secret
     name: shared-tls
     namespace: cert-manager
@@ -130,19 +124,19 @@ This is also the right shape when the destinations don't share a label predicate
   kind: Projection
   metadata: { name: org-policy, namespace: tenant-a }
   spec:
-    source: { group: "", version: v1, kind: ConfigMap, namespace: platform, name: org-policy }
+    source: { kind: ConfigMap, namespace: platform, name: org-policy }
     overlay: { labels: { tenant: tenant-a } }
 - apiVersion: projection.sh/v1
   kind: Projection
   metadata: { name: org-policy, namespace: tenant-b }
   spec:
-    source: { group: "", version: v1, kind: ConfigMap, namespace: platform, name: org-policy }
+    source: { kind: ConfigMap, namespace: platform, name: org-policy }
     overlay: { labels: { tenant: tenant-b } }
 - apiVersion: projection.sh/v1
   kind: Projection
   metadata: { name: org-policy, namespace: tenant-c }
   spec:
-    source: { group: "", version: v1, kind: ConfigMap, namespace: platform, name: org-policy }
+    source: { kind: ConfigMap, namespace: platform, name: org-policy }
     overlay: { labels: { tenant: tenant-c } }
 ```
 
@@ -171,8 +165,6 @@ metadata:
   namespace: team-a               # destination namespace = this
 spec:
   source:
-    group: ""
-    version: v1
     kind: ConfigMap
     name: base-config
     namespace: platform
@@ -202,8 +194,6 @@ metadata:
   name: cluster-root-ca-fanout
 spec:
   source:
-    group: ""
-    version: v1
     kind: Secret
     name: cluster-root-ca
     namespace: cert-manager
@@ -221,8 +211,6 @@ metadata:
   namespace: app-prod
 spec:
   source:
-    group: ""
-    version: v1
     kind: Secret
     name: cluster-root-ca
     namespace: cert-manager
@@ -253,8 +241,6 @@ metadata:
   namespace: team-b                # destination namespace = this
 spec:
   source:
-    group: ""
-    version: v1
     kind: Service
     name: api
     namespace: default

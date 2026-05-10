@@ -31,7 +31,7 @@ spec:
       name: Source-Name
       type: string
     - jsonPath: .status.destinationName
-      name: Destination
+      name: Destination-Name
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
@@ -131,10 +131,10 @@ spec:
                   version:
                     description: |-
                       Version is the API version of the source object within its Group. Omit
-                      for non-core groups to use the RESTMapper's preferred served version
-                      (the source automatically follows CRD version promotions). When set,
-                      must match Kubernetes' canonical version-string shape (`vN`,
-                      `vNalphaM`, `vNbetaM`).
+                      to use the RESTMapper's preferred served version (the source
+                      automatically follows version promotions). When set, must match
+                      Kubernetes' canonical version-string shape (`vN`, `vNalphaM`,
+                      `vNbetaM`).
                     pattern: ^$|^v[0-9]+((alpha|beta)[0-9]+)?$
                     type: string
                 required:
@@ -142,10 +142,6 @@ spec:
                 - name
                 - namespace
                 type: object
-                x-kubernetes-validations:
-                - message: version is required when group is empty (no unpinned form
-                    for core)
-                  rule: size(self.group) != 0 || size(self.version) != 0
             required:
             - source
             type: object

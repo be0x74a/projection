@@ -100,7 +100,7 @@ type ClusterProjectionStatus struct {
 // +kubebuilder:printcolumn:name="Source-Group",type=string,JSONPath=`.spec.source.group`,priority=1
 // +kubebuilder:printcolumn:name="Source-Namespace",type=string,JSONPath=`.spec.source.namespace`
 // +kubebuilder:printcolumn:name="Source-Name",type=string,JSONPath=`.spec.source.name`
-// +kubebuilder:printcolumn:name="Destination",type=string,JSONPath=`.status.destinationName`
+// +kubebuilder:printcolumn:name="Destination-Name",type=string,JSONPath=`.status.destinationName`
 // +kubebuilder:printcolumn:name="Targets",type=integer,JSONPath=`.status.namespacesWritten`
 // +kubebuilder:printcolumn:name="Failed",type=integer,JSONPath=`.status.namespacesFailed`,priority=1
 // +kubebuilder:printcolumn:name="Selector",type=string,JSONPath=`.spec.destination.namespaceSelector.matchLabels`,priority=1
