@@ -31,7 +31,7 @@ spec:
       name: Source-Name
       type: string
     - jsonPath: .status.destinationName
-      name: Destination
+      name: Destination-Name
       type: string
     - jsonPath: .status.namespacesWritten
       name: Targets

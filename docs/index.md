@@ -54,8 +54,8 @@ spec:
 
 ```console
 $ kubectl get projections -n tenant-a
-NAME                KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION   READY
-app-config-mirror   ConfigMap   platform           app-config    app-config    True
+NAME                KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION-NAME   READY
+app-config-mirror   ConfigMap   platform           app-config    app-config         True
 
 $ kubectl get configmap -n tenant-a app-config \
     -o jsonpath='{.metadata.annotations.projection\.sh/owned-by-projection}'

@@ -72,7 +72,7 @@ type ProjectionStatus struct {
 // +kubebuilder:printcolumn:name="Source-Group",type=string,JSONPath=`.spec.source.group`,priority=1
 // +kubebuilder:printcolumn:name="Source-Namespace",type=string,JSONPath=`.spec.source.namespace`
 // +kubebuilder:printcolumn:name="Source-Name",type=string,JSONPath=`.spec.source.name`
-// +kubebuilder:printcolumn:name="Destination",type=string,JSONPath=`.status.destinationName`
+// +kubebuilder:printcolumn:name="Destination-Name",type=string,JSONPath=`.status.destinationName`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

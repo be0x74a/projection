@@ -128,8 +128,8 @@ kubectl get projections -A
 ```
 
 ```console
-NAMESPACE   NAME                KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION   READY   AGE
-tenant-a    app-config-mirror   ConfigMap   default            app-config    app-config    True    3s
+NAMESPACE   NAME                KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION-NAME   READY   AGE
+tenant-a    app-config-mirror   ConfigMap   default            app-config    app-config         True    3s
 ```
 
 `Destination` reflects `status.destinationName` — the resolved name after any rename, populated after the first successful write.
@@ -194,7 +194,7 @@ kubectl get clusterprojections
 ```
 
 ```console
-NAME                   KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION         TARGETS   READY   AGE
+NAME                   KIND        SOURCE-NAMESPACE   SOURCE-NAME   DESTINATION-NAME    TARGETS   READY   AGE
 shared-config-fanout   ConfigMap   default            app-config    shared-app-config   2         True    4s
 ```
 

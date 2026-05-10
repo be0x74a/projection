@@ -81,11 +81,11 @@ Note: there is no `spec.destination.namespace` and no `spec.destination.namespac
 | `Source-Group`     | `.spec.source.group`                                              | with `-o wide` (priority=1) |
 | `Source-Namespace` | `.spec.source.namespace`                                          | yes      |
 | `Source-Name`      | `.spec.source.name`                                               | yes      |
-| `Destination`      | `.status.destinationName`                                         | yes      |
+| `Destination-Name` | `.status.destinationName`                                         | yes      |
 | `Ready`            | `.status.conditions[?(@.type=='Ready')].status`                   | yes      |
 | `Age`              | `.metadata.creationTimestamp`                                     | yes      |
 
-`Destination` reflects the **resolved** destination name from status — the rename applied (or the source name when no rename is set), populated after the first successful write.
+`Destination-Name` reflects the **resolved** destination name from status — the rename applied (or the source name when no rename is set), populated after the first successful write.
 
 ## Worked example
 
@@ -190,7 +190,7 @@ At least one must be set — empty `destination` is rejected.
 | `Source-Group`     | `.spec.source.group`                                                          | with `-o wide` (priority=1) |
 | `Source-Namespace` | `.spec.source.namespace`                                                      | yes      |
 | `Source-Name`      | `.spec.source.name`                                                           | yes      |
-| `Destination`      | `.status.destinationName`                                                     | yes      |
+| `Destination-Name` | `.status.destinationName`                                                     | yes      |
 | `Targets`          | `.status.namespacesWritten`                                                   | yes      |
 | `Failed`           | `.status.namespacesFailed`                                                    | with `-o wide` (priority=1) |
 | `Selector`         | `.spec.destination.namespaceSelector.matchLabels`                             | with `-o wide` (priority=1) |
