@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-10
+
 ### Added
 
 - **Release-time bench workflow** (`.github/workflows/bench.yml`). Manually triggered (`workflow_dispatch`) against a release tag, branch, or SHA; runs the full 8-profile bench matrix on a self-hosted runner (label `bench-runner`) and persists the resulting JSON to the `bench-history` orphan branch under `bench-history/<label>.json`. The orphan branch is self-bootstrapped on first run. A markdown table of source-update / self-heal / ns-flip p99 latencies by profile is rendered into the workflow's step summary, and the bench JSON is uploaded as an artifact. `pull_request` triggers are deliberately omitted — self-hosted runners on public repos are exposed to fork-PR malicious code, so this workflow is operator-driven only. Per-PR shape-break smoke coverage continues to run on `ubuntu-22.04` via `bench-smoke.yml`.
